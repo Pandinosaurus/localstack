@@ -66,3 +66,6 @@ volume/
 
 # ANTLR4 ID plugin.
 gen/
+
+# hypothesis pytest plugin
+.hypothesis
