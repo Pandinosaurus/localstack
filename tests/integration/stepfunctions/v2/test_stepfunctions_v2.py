@@ -5,6 +5,7 @@ import os
 import pytest
 
 from localstack.constants import (
+    TEST_AWS_SECRET_ACCESS_KEY,
     SECONDARY_TEST_AWS_ACCESS_KEY_ID,
     SECONDARY_TEST_AWS_SECRET_ACCESS_KEY,
 )
@@ -666,7 +667,7 @@ def test_default_logging_configuration(create_state_machine, aws_client):
         aws_client.iam.delete_role(RoleName=role_name)
 
 
-def test_aws_sdk_task(aws_client):
+def test_aws_sdk_task(aws_client, aws_client_factory):
     statemachine_definition = {
         "StartAt": "CreateTopicTask",
         "States": {
@@ -742,9 +743,21 @@ def test_aws_sdk_task(aws_client):
             # assert result["stateMachineArn"] == machine_arn
 
             topic_arn = json.loads(describe_result["output"])["TopicArn"]
-            topics = aws_client.sns.list_topics()
+
+            # SF creates resources in the default account (000000000000) and not the account of the requester
+            # When SNS supports cross-account access, the client factory below can be removed and simply `aws_client.sns` can be used.
+            # Bug report: https://github.com/localstack/localstack/issues/8205
+            arn_data = arns.parse_arn(topic_arn)
+            sns_client = aws_client_factory(
+                aws_access_key_id=arn_data["account"],
+                aws_secret_access_key=TEST_AWS_SECRET_ACCESS_KEY,
+                region_name=arn_data["region"],
+            ).sns
+
+            topics = sns_client.list_topics()
             assert topic_arn in [t["TopicArn"] for t in topics["Topics"]]
-            aws_client.sns.delete_topic(TopicArn=topic_arn)
+
+            sns_client.delete_topic(TopicArn=topic_arn)
             return True
 
         assert wait_until(_retry_execution, max_retries=3, strategy="linear", wait=3.0)
