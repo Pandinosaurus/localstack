@@ -95,6 +95,7 @@ class TestClientFactory:
 
         mock.reset_mock()
 
+        # Ensure client doesn't throw partial credential error if only access key ID is set but not secret access key
         connect_to.get_client("def", region_name=None, aws_access_key_id=TEST_AWS_ACCESS_KEY_ID)
         mock.assert_called_once_with(
             service_name="def",
