@@ -184,6 +184,7 @@ from localstack.services.awslambda.invocation.runtime_executor import get_runtim
 from localstack.services.awslambda.lambda_utils import validate_filters
 from localstack.services.awslambda.layerfetcher.layer_fetcher import LayerFetcher
 from localstack.services.awslambda.urlrouter import FunctionUrlRouter
+from localstack.services.awslambda.v3.lambda_service import NextGenLambdaService
 from localstack.services.edge import ROUTER
 from localstack.services.plugins import ServiceLifecycleHook
 from localstack.state import StateVisitor
