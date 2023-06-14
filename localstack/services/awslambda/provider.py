@@ -154,7 +154,6 @@ from localstack.services.awslambda.invocation.lambda_models import (
     FunctionUrlConfig,
     FunctionVersion,
     ImageConfig,
-    InvocationError,
     LambdaEphemeralStorage,
     Layer,
     LayerPolicy,
@@ -184,7 +183,6 @@ from localstack.services.awslambda.invocation.runtime_executor import get_runtim
 from localstack.services.awslambda.lambda_utils import validate_filters
 from localstack.services.awslambda.layerfetcher.layer_fetcher import LayerFetcher
 from localstack.services.awslambda.urlrouter import FunctionUrlRouter
-from localstack.services.awslambda.v3.lambda_service import NextGenLambdaService
 from localstack.services.edge import ROUTER
 from localstack.services.plugins import ServiceLifecycleHook
 from localstack.state import StateVisitor
@@ -1249,29 +1247,28 @@ class LambdaProvider(LambdaApi, ServiceLifecycleHook):
                 )
 
         time_before = time.perf_counter()
-        result = self.lambda_service.invoke(
-            function_name=function_name,
-            qualifier=qualifier,
-            region=region,
-            account_id=account_id,
-            invocation_type=invocation_type,
-            client_context=client_context,
-            request_id=context.request_id,
-            payload=payload.read() if payload else None,
-        )
+        try:
+            invocation_result = self.lambda_service.invoke(
+                function_name=function_name,
+                qualifier=qualifier,
+                region=region,
+                account_id=account_id,
+                invocation_type=invocation_type,
+                client_context=client_context,
+                request_id=context.request_id,
+                payload=payload.read() if payload else None,
+            )
+        except Exception as e:
+            LOG.error("Error while invoking lambda", exc_info=e)
+            # TODO map to correct exception
+            raise ServiceException("Internal error while executing lambda") from e
+
         if invocation_type == InvocationType.Event:
             # This happens when invocation type is event
             return InvocationResponse(StatusCode=202)
         if invocation_type == InvocationType.DryRun:
             # This happens when invocation type is dryrun
             return InvocationResponse(StatusCode=204)
-        try:
-            invocation_result = result.result()
-        except Exception as e:
-            LOG.error("Error while invoking lambda", exc_info=e)
-            # TODO map to correct exception
-            raise ServiceException("Internal error while executing lambda") from e
-
         LOG.debug("Lambda invocation duration: %0.2fms", (time.perf_counter() - time_before) * 1000)
 
         response = InvocationResponse(
@@ -1280,7 +1277,7 @@ class LambdaProvider(LambdaApi, ServiceLifecycleHook):
             ExecutedVersion=invocation_result.executed_version,
         )
 
-        if isinstance(invocation_result, InvocationError):
+        if invocation_result.is_error:
             response["FunctionError"] = "Unhandled"
 
         if log_type == LogType.Tail:
