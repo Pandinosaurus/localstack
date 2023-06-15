@@ -584,7 +584,7 @@ class TestLambdaBehavior:
         snapshot.match("create-result", create_result)
 
         result = aws_client.awslambda.invoke(
-            FunctionName=func_name, Payload=json.dumps({"wait": 1}), InvocationType="Event"
+            FunctionName=func_name, Payload=json.dumps({"wait": 1})
         )
         snapshot.match("invoke-result", result)
         log_group_name = f"/aws/lambda/{func_name}"
