@@ -176,8 +176,10 @@ class LambdaService:
                 function_version=function_version,
                 lambda_service=self,
                 function=fn,
-                # TODO: inject specific view
-                counting_service=CountingService(),
+                counting_service=CountingService.get(),
+                # counting_service=CountingService.get_view(
+                #     account=function_version.id.account, region=function_version.id.region
+                # ),
                 assignment_service=self.assignment_service,
             )
             self.lambda_starting_versions[qualified_arn] = version_manager
@@ -310,14 +312,16 @@ class LambdaService:
         #  at [Source: (byte[])"'test'"; line: 1, column: 2]
         #
         if invocation_type == InvocationType.Event:
-            return event_manager.enqueue_event(invocation=Invocation(
-                payload=payload,
-                invoked_arn=invoked_arn,
-                client_context=client_context,
-                invocation_type=invocation_type,
-                invoke_time=datetime.now(),
-                request_id=request_id,
-            ))
+            return event_manager.enqueue_event(
+                invocation=Invocation(
+                    payload=payload,
+                    invoked_arn=invoked_arn,
+                    client_context=client_context,
+                    invocation_type=invocation_type,
+                    invoke_time=datetime.now(),
+                    request_id=request_id,
+                )
+            )
 
         return version_manager.invoke(
             invocation=Invocation(
@@ -372,7 +376,9 @@ class LambdaService:
                 old_version = self.lambda_running_versions.get(function_arn, None)
                 old_event_manager = self.event_managers.get(function_arn, None)
                 self.lambda_running_versions[function_arn] = new_version_manager
-                self.event_managers[function_arn] = LambdaEventManager(version_manager=new_version_manager)
+                self.event_managers[function_arn] = LambdaEventManager(
+                    version_manager=new_version_manager
+                )
                 update_status = UpdateStatus(status=LastUpdateStatus.Successful)
             elif new_state.state == State.Failed:
                 update_status = UpdateStatus(status=LastUpdateStatus.Failed)
