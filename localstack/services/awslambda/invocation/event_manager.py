@@ -1,9 +1,10 @@
+import base64
+import dataclasses
 import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from math import ceil
 from typing import Optional
 
 from localstack import config
@@ -17,8 +18,21 @@ from localstack.utils.time import timestamp_millis
 
 LOG = logging.getLogger(__name__)
 
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        if isinstance(o, bytes):
+            return base64.b64encode(o)
+        return super().default(o)
+
+
 class LambdaEventManager:
     version_manager: LambdaVersionManager
+
     def __init__(self, version_manager: LambdaVersionManager):
         self.version_manager = version_manager
         # event threads perform the synchronous invocation
@@ -36,10 +50,7 @@ class LambdaEventManager:
         LOG.debug("Got event invocation with id %s", invocation_result.request_id)
 
         # 1. Handle DLQ routing
-        if (
-            invocation_result.is_error
-            and self.function_version.config.dead_letter_arn
-        ):
+        if invocation_result.is_error and self.function_version.config.dead_letter_arn:
             try:
                 dead_letter_queue._send_to_dead_letter_queue(
                     source_arn=self.version_manager.function_arn,
@@ -52,7 +63,9 @@ class LambdaEventManager:
                 )
             except Exception as e:
                 LOG.warning(
-                    "Error sending to DLQ %s: %s", self.version_manager.function_version.config.dead_letter_arn, e
+                    "Error sending to DLQ %s: %s",
+                    self.version_manager.function_version.config.dead_letter_arn,
+                    e,
                 )
 
         # 2. Handle actual destination setup
@@ -188,8 +201,9 @@ class LambdaEventManager:
     def process_success_destination(self):
         pass
 
-
-    def process_failure_destination(self, invocation: Invocation, invocation_result: InvocationResult):
+    def process_failure_destination(
+        self, invocation: Invocation, invocation_result: InvocationResult
+    ):
         try:
             dead_letter_queue._send_to_dead_letter_queue(
                 source_arn=self.version_manager.function_arn,
@@ -202,7 +216,9 @@ class LambdaEventManager:
             )
         except Exception as e:
             LOG.warning(
-                "Error sending to DLQ %s: %s", self.version_manager.function_version.config.dead_letter_arn, e
+                "Error sending to DLQ %s: %s",
+                self.version_manager.function_version.config.dead_letter_arn,
+                e,
             )
 
     def invoke(self, invocation: Invocation):
@@ -226,6 +242,18 @@ class LambdaEventManager:
                 return
 
     def enqueue_event(self, invocation: Invocation) -> None:
+        # TODO: enque into SQS queue
+        # message = json.dumps(invocation, cls=EnhancedJSONEncoder)
+        message = {
+            "payload": base64.b64encode(invocation.payload),
+            "invoked_arn": invocation.invoked_arn,
+            "client_context": invocation.client_context,
+            "invocation_type": invocation.invocation_type,
+            "invoke_time": invocation.invoke_time.isoformat(),
+            # = invocation_id
+            "request_id": invocation.request_id,
+        }
+        print(message)
         self.event_threads.submit(self.invoke, invocation)
 
     def stop(self) -> None:
