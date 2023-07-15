@@ -5,9 +5,9 @@ import os
 import pytest
 
 from localstack.constants import (
-    TEST_AWS_SECRET_ACCESS_KEY,
     SECONDARY_TEST_AWS_ACCESS_KEY_ID,
     SECONDARY_TEST_AWS_SECRET_ACCESS_KEY,
+    TEST_AWS_SECRET_ACCESS_KEY,
 )
 from localstack.services.events.provider import TEST_EVENTS_CACHE
 from localstack.testing.pytest import markers
