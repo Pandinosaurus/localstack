@@ -14,7 +14,7 @@ from localstack.aws.accounts import (
 from localstack.aws.api import RequestContext
 from localstack.aws.skeleton import Skeleton
 from localstack.aws.spec import load_service
-from localstack.constants import TEST_AWS_ACCESS_KEY_ID
+from localstack.constants import DEFAULT_AWS_ACCOUNT_ID
 from localstack.http import Request, Response
 from localstack.http.adapters import ProxyListenerAdapter
 from localstack.utils.aws.aws_stack import extract_access_key_id_from_auth_header
@@ -29,7 +29,7 @@ def get_region(request: Request) -> str:
 
 def get_account_id_from_request(request: Request) -> str:
     access_key_id = (
-        extract_access_key_id_from_auth_header(request.headers) or TEST_AWS_ACCESS_KEY_ID
+        extract_access_key_id_from_auth_header(request.headers) or DEFAULT_AWS_ACCOUNT_ID
     )
     set_aws_access_key_id(access_key_id)
 

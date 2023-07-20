@@ -19,6 +19,7 @@ from localstack.aws.accounts import (
 )
 from localstack.aws.protocol.service_router import determine_aws_service_name
 from localstack.constants import (
+    DEFAULT_AWS_ACCOUNT_ID,
     HEADER_LOCALSTACK_ACCOUNT_ID,
     HEADER_LOCALSTACK_EDGE_URL,
     HEADER_LOCALSTACK_REQUEST_URL,
@@ -26,7 +27,6 @@ from localstack.constants import (
     LOCALHOST_IP,
     LOCALSTACK_ROOT_FOLDER,
     LS_LOG_TRACE_INTERNAL,
-    TEST_AWS_ACCESS_KEY_ID,
 )
 from localstack.http import Router
 from localstack.http.adapters import create_request_from_parts
@@ -102,7 +102,7 @@ class ProxyListenerEdge(ProxyListener):
         )
 
         # Obtain the access key ID and save it in the thread context
-        access_key_id = extract_access_key_id_from_auth_header(headers) or TEST_AWS_ACCESS_KEY_ID
+        access_key_id = extract_access_key_id_from_auth_header(headers) or DEFAULT_AWS_ACCOUNT_ID
         set_aws_access_key_id(access_key_id)
         # Obtain the account ID
         account_id = get_account_id_from_access_key_id(access_key_id)
