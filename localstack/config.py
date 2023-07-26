@@ -501,7 +501,7 @@ class HostAndPort:
         cls,
         input: str,
         default_host: Optional[str] = None,
-        default_port: int = constants.DEFAULT_PORT_EDGE,
+        default_port: Optional[int] = None,
     ) -> "HostAndPort":
         host, port = default_host, default_port
         if ":" in input:
@@ -567,6 +567,7 @@ def populate_legacy_edge_configuration(
         localstack_host = HostAndPort.parse(
             localstack_host,
             default_host=constants.LOCALHOST_HOSTNAME,
+            default_port=constants.DEFAULT_PORT_EDGE,
         )
 
     def legacy_fallback(envar_name: str, default: T) -> T:
@@ -581,7 +582,11 @@ def populate_legacy_edge_configuration(
     if gateway_listen_raw is not None:
         gateway_listen = []
         for address in gateway_listen_raw.split(","):
-            gateway_listen.append(HostAndPort.parse(address.strip(), default_host=default_ip))
+            gateway_listen.append(
+                HostAndPort.parse(
+                    address.strip(), default_host=default_ip, default_port=localstack_host.port
+                )
+            )
     else:
         edge_port = int(environment.get("EDGE_PORT", localstack_host.port))
         edge_port_http = int(environment.get("EDGE_PORT_HTTP", 0))
