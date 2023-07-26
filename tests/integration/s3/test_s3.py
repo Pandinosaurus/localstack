@@ -684,8 +684,10 @@ class TestS3:
     def test_list_objects_versions_with_prefix(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
         objects = [
-            {"Key": "dir/test", "Content": b"content 1"},
-            {"Key": "dir/subdir/test2", "Content": b"content 2"},
+            {"Key": "dir/test", "Content": b"content key1-v1"},
+            {"Key": "dir/test", "Content": b"content key-1v2"},
+            {"Key": "dir/subdir/test2", "Content": b"content key2-v1"},
+            {"Key": "dir/subdir/test2", "Content": b"content key2-v2"},
         ]
         params = [
             {"Prefix": "dir/", "Delimiter": "/", "Id": 1},

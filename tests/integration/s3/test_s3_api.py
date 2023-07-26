@@ -184,3 +184,24 @@ class TestS3ObjectCRUD:
                 Bucket=s3_bucket, Key=key_name, VersionId="HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD"
             )
         snapshot.match("get-obj-with-version", e.value.response)
+
+    def test_list_object_versions_order_unversioned(self, s3_bucket, aws_client, snapshot):
+        snapshot.add_transformer(snapshot.transform.s3_api())
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-empty", list_object_versions)
+
+        key_name = "a-test-object-1"
+        put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-object-1")
+        snapshot.match("put-object", put_object)
+
+        key_name = "c-test-object-3"
+        put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-object-3")
+        snapshot.match("put-object-3", put_object)
+
+        key_name = "b-test-object-2"
+        put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-object-2")
+        snapshot.match("put-object-2", put_object)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-object-versions", list_object_versions)

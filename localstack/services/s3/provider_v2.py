@@ -19,6 +19,7 @@ from localstack.aws.api.s3 import (
     ChecksumCRC32C,
     ChecksumSHA1,
     ChecksumSHA256,
+    CommonPrefix,
     CompletedMultipartUpload,
     CompleteMultipartUploadOutput,
     CopyObjectOutput,
@@ -30,6 +31,7 @@ from localstack.aws.api.s3 import (
     CreateMultipartUploadOutput,
     CreateMultipartUploadRequest,
     Delete,
+    DeleteMarkerEntry,
     DeleteObjectOutput,
     DeleteObjectsOutput,
     Delimiter,
@@ -51,7 +53,9 @@ from localstack.aws.api.s3 import (
     KeyMarker,
     ListBucketsOutput,
     ListMultipartUploadsOutput,
+    ListObjectVersionsOutput,
     ListPartsOutput,
+    MaxKeys,
     MaxParts,
     MaxUploads,
     MultipartUpload,
@@ -60,7 +64,10 @@ from localstack.aws.api.s3 import (
     NoSuchUpload,
     ObjectKey,
     ObjectSize,
+    ObjectVersion,
     ObjectVersionId,
+    ObjectVersionStorageClass,
+    OptionalObjectAttributesList,
     Part,
     PartNumberMarker,
     Prefix,
@@ -78,6 +85,7 @@ from localstack.aws.api.s3 import (
     UploadPartCopyRequest,
     UploadPartOutput,
     UploadPartRequest,
+    VersionIdMarker,
 )
 from localstack.services.plugins import ServiceLifecycleHook
 from localstack.services.s3.codec import AwsChunkedDecoder
@@ -249,8 +257,10 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
-        location_constraint = """<?xml version="1.0" encoding="UTF-8"?>
-<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">{{location}}</LocationConstraint>"""
+        location_constraint = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">{{location}}</LocationConstraint>'
+        )
 
         location = s3_bucket.bucket_region if s3_bucket.bucket_region != "us-east-1" else ""
         location_constraint = location_constraint.replace("{{location}}", location)
@@ -322,7 +332,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # TODO check if key already exist, and if it is locked?
 
         # TODO: check length VERSION_ID
-        version_id = get_version_id(s3_bucket.versioning_status)
+        version_id = generate_version_id(s3_bucket.versioning_status)
 
         fileobj = self._storage_backend.get_key_fileobj(
             bucket_name=bucket_name,
@@ -426,7 +436,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # expected_bucket_owner: AccountId = None,
     ) -> GetObjectOutput:
         # TODO: might add x-robot for system metadata??
-        #     DeleteMarker: Optional[DeleteMarker] # TODO: this is on the NotFound exception actually?
         #     Expiration: Optional[Expiration]
         #     Restore: Optional[Restore]
 
@@ -595,11 +604,12 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # TODO: RequestCharged
             # TODO: delete the real fileobject under if key
             if found_object:
-                self._storage_backend.delete_fileobj(bucket_name=bucket, object_key=key)
+                self._storage_backend.delete_key_fileobj(bucket_name=bucket, object_key=key)
             return DeleteObjectOutput()
 
         if not version_id:
-            delete_marker = S3DeleteMarker(key=key)
+            delete_marker_id = generate_version_id(s3_bucket.versioning_status)
+            delete_marker = S3DeleteMarker(key=key, version_id=delete_marker_id)
             # TODO: verify with Suspended bucket? does it override last version or still append?? big question
             # I think it puts a delete marker with a `null` VersionId, which deletes the object under
             # append the DeleteMaker to the objects stack
@@ -630,7 +640,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if isinstance(found_object, S3DeleteMarker):
             response["DeleteMarker"] = True
         else:
-            self._storage_backend.delete_fileobj(
+            self._storage_backend.delete_key_fileobj(
                 bucket_name=bucket, object_key=key, version_id=version_id
             )
 
@@ -748,7 +758,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             version_id=src_version_id,
         )
 
-        dest_version_id = get_version_id(dest_s3_bucket.versioning_status)
+        dest_version_id = generate_version_id(dest_s3_bucket.versioning_status)
         dest_fileobj = self._storage_backend.get_key_fileobj(
             bucket_name=dest_bucket,
             object_key=dest_key,
@@ -853,19 +863,126 @@ class S3Provider(S3Api, ServiceLifecycleHook):
     # ) -> ListObjectsV2Output:
     #     pass
 
-    # def list_object_versions(
-    #     self,
-    #     context: RequestContext,
-    #     bucket: BucketName,
-    #     delimiter: Delimiter = None,
-    #     encoding_type: EncodingType = None,
-    #     key_marker: KeyMarker = None,
-    #     max_keys: MaxKeys = None,
-    #     prefix: Prefix = None,
-    #     version_id_marker: VersionIdMarker = None,
-    #     expected_bucket_owner: AccountId = None,
-    # ) -> ListObjectVersionsOutput:
-    #     pass
+    def list_object_versions(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        delimiter: Delimiter = None,
+        encoding_type: EncodingType = None,
+        key_marker: KeyMarker = None,
+        max_keys: MaxKeys = None,
+        prefix: Prefix = None,
+        version_id_marker: VersionIdMarker = None,
+        expected_bucket_owner: AccountId = None,
+        request_payer: RequestPayer = None,
+        optional_object_attributes: OptionalObjectAttributesList = None,
+    ) -> ListObjectVersionsOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        common_prefixes = set()
+        count = 0
+        is_truncated = False
+        next_key_marker = None
+        next_version_id_marker = None
+        max_keys = max_keys or 1000
+
+        object_versions: list[ObjectVersion] = []
+        delete_markers: list[DeleteMarkerEntry] = []
+
+        all_versions = s3_bucket.objects.values()
+        # sort by key, and last-modified-date, to get the last version first
+        all_versions.sort(key=lambda r: (r.key, r.last_modified))
+
+        for version in all_versions:
+            key = version.key
+            # skip all keys that alphabetically come before key_marker
+            if key_marker:
+                if key < key_marker:
+                    continue
+                elif key == key_marker:
+                    # if we're at the key_marker, skip versions that are before version_id_marker
+                    if version_id_marker and version.version_id < version_id_marker:
+                        continue
+
+            # Filter for keys that start with prefix
+            if prefix and not key.startswith(prefix):
+                continue
+
+            # separate keys that contain the same string between the prefix and the first occurrence of the delimiter
+            if delimiter and delimiter in (key_no_prefix := key.removeprefix(prefix)):
+                pre_delimiter, _, _ = key_no_prefix.partition(delimiter)
+                prefix_including_delimiter = f"{prefix}{pre_delimiter}{delimiter}"
+
+                if prefix_including_delimiter not in common_prefixes:
+                    count += 1
+                    common_prefixes.add(prefix_including_delimiter)
+                continue
+
+            count += 1
+            if count > max_keys:
+                is_truncated = True
+                next_key_marker = version.key
+                next_version_id_marker = version.version_id
+                break
+
+            if isinstance(version, S3DeleteMarker):
+                delete_marker = DeleteMarkerEntry(
+                    Key=version.key,
+                    Owner=s3_bucket.owner,
+                    VersionId=version.version_id,
+                    IsLatest=version.is_current,
+                    LastModified=version.last_modified,
+                )
+                delete_markers.append(delete_marker)
+                continue
+
+            # TODO: add RestoreStatus if present
+            object_version = ObjectVersion(
+                Key=version.key,
+                ETag=f'"{version.etag}"',
+                Owner=s3_bucket.owner,  # TODO: verify reality
+                Size=version.size,
+                VersionId=version.version_id or "null",
+                LastModified=version.last_modified,
+                IsLatest=version.is_current,
+                # TODO: verify this, are other class possible?
+                # StorageClass=version.storage_class,
+                StorageClass=ObjectVersionStorageClass.STANDARD,
+            )
+
+            if version.checksum_algorithm:
+                object_version["ChecksumAlgorithm"] = [version.checksum_algorithm]
+
+            object_versions.append(object_version)
+
+        common_prefixes = [CommonPrefix(Prefix=prefix) for prefix in sorted(common_prefixes)]
+
+        response = ListObjectVersionsOutput(
+            IsTruncated=is_truncated,
+            Name=bucket,
+            MaxKeys=max_keys,
+            EncodingType=EncodingType.url,
+            Prefix=prefix or "",
+            KeyMarker=key_marker or "",
+            VersionIdMarker=version_id_marker or "",
+        )
+        if object_versions:
+            response["Versions"] = object_versions
+        if delete_markers:
+            response["DeleteMarkers"] = delete_markers
+        if delimiter:
+            response["Delimiter"] = delimiter
+        if common_prefixes:
+            response["CommonPrefixes"] = common_prefixes
+        if next_key_marker:
+            response["NextKeyMarker"] = next_key_marker
+        if next_version_id_marker:
+            response["NextVersionIdMarker"] = next_version_id_marker
+
+        # RequestCharged: Optional[RequestCharged]  # TODO
+        return response
 
     @handler("GetObjectAttributes", expand=False)
     def get_object_attributes(
@@ -1261,7 +1378,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             )
 
         parts_fileobjs = self._storage_backend.get_list_parts_fileobjs(bucket, upload_id)
-        version_id = get_version_id(s3_bucket.versioning_status)
+        version_id = generate_version_id(s3_bucket.versioning_status)
         dest_key_fileobj = self._storage_backend.get_key_fileobj(bucket, key, version_id)
 
         try:
@@ -1463,7 +1580,7 @@ def get_body_iterator(
             # don't read more than the max content-length
             amount = min(_max_length, S3_CHUNK_SIZE)
             with stream.lock:
-                stream.seek(pos)  # TODO: is seek an heavy op?
+                stream.seek(pos)
                 data = stream.read(amount)
             if not data:
                 return b""
@@ -1510,7 +1627,7 @@ def readinto_fileobj(
         return size, etag, None
 
 
-def get_version_id(bucket_versioning_status: str) -> str | None:
+def generate_version_id(bucket_versioning_status: str) -> str | None:
     if not bucket_versioning_status:
         return None
 

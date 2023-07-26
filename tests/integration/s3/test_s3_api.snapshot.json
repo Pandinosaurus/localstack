@@ -217,5 +217,101 @@
         }
       }
     }
+  },
+  "tests/integration/s3/test_s3_api.py::TestS3ObjectCRUD::test_list_object_versions_order_unversioned": {
+    "recorded-date": "26-07-2023, 21:32:00",
+    "recorded-content": {
+      "list-empty": {
+        "EncodingType": "url",
+        "IsTruncated": false,
+        "KeyMarker": "",
+        "MaxKeys": 1000,
+        "Name": "<bucket-name:1>",
+        "Prefix": "",
+        "VersionIdMarker": "",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "put-object": {
+        "ETag": "\"1b5c4d94104ea274dc3a49a55179de86\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "put-object-3": {
+        "ETag": "\"2532913c38a0c3046be3dc4e434df6e6\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "put-object-2": {
+        "ETag": "\"2f3c2d190be43f3f6cd1c26ce4c59ae6\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "list-object-versions": {
+        "EncodingType": "url",
+        "IsTruncated": false,
+        "KeyMarker": "",
+        "MaxKeys": 1000,
+        "Name": "<bucket-name:1>",
+        "Prefix": "",
+        "VersionIdMarker": "",
+        "Versions": [
+          {
+            "ETag": "\"1b5c4d94104ea274dc3a49a55179de86\"",
+            "IsLatest": true,
+            "Key": "a-test-object-1",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 13,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:1>"
+          },
+          {
+            "ETag": "\"2f3c2d190be43f3f6cd1c26ce4c59ae6\"",
+            "IsLatest": true,
+            "Key": "b-test-object-2",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 13,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:1>"
+          },
+          {
+            "ETag": "\"2532913c38a0c3046be3dc4e434df6e6\"",
+            "IsLatest": true,
+            "Key": "c-test-object-3",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 13,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:1>"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   }
 }

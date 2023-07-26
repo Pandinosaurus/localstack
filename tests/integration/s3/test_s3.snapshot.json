@@ -4940,7 +4940,7 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_list_objects_versions_with_prefix": {
-    "recorded-date": "27-02-2023, 13:35:27",
+    "recorded-date": "26-07-2023, 20:15:22",
     "recorded-content": {
       "list-object-version-1": {
         "CommonPrefixes": [
@@ -4958,7 +4958,7 @@
         "VersionIdMarker": "",
         "Versions": [
           {
-            "ETag": "\"9297ab3fbd56b42f6566284119238125\"",
+            "ETag": "\"c978d4a128605d97d7c5b1bd17250efd\"",
             "IsLatest": true,
             "Key": "dir/test",
             "LastModified": "datetime",
@@ -4966,9 +4966,22 @@
               "DisplayName": "<display-name>",
               "ID": "<owner-id>"
             },
-            "Size": 9,
+            "Size": 15,
             "StorageClass": "STANDARD",
             "VersionId": "<version-id:1>"
+          },
+          {
+            "ETag": "\"dbe906ced633d4580318b1cc37ce1ca4\"",
+            "IsLatest": false,
+            "Key": "dir/test",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 15,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:2>"
           }
         ],
         "ResponseMetadata": {
@@ -5006,7 +5019,7 @@
         "VersionIdMarker": "",
         "Versions": [
           {
-            "ETag": "\"9297ab3fbd56b42f6566284119238125\"",
+            "ETag": "\"c978d4a128605d97d7c5b1bd17250efd\"",
             "IsLatest": true,
             "Key": "dir/test",
             "LastModified": "datetime",
@@ -5014,9 +5027,22 @@
               "DisplayName": "<display-name>",
               "ID": "<owner-id>"
             },
-            "Size": 9,
+            "Size": 15,
             "StorageClass": "STANDARD",
             "VersionId": "<version-id:1>"
+          },
+          {
+            "ETag": "\"dbe906ced633d4580318b1cc37ce1ca4\"",
+            "IsLatest": false,
+            "Key": "dir/test",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 15,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:2>"
           }
         ],
         "ResponseMetadata": {
@@ -5054,7 +5080,7 @@
         "VersionIdMarker": "",
         "Versions": [
           {
-            "ETag": "\"6685cd62b95f2c58818cb20e7292168b\"",
+            "ETag": "\"56a8b2485f9683f70ea3316e6fa46be1\"",
             "IsLatest": true,
             "Key": "dir/subdir/test2",
             "LastModified": "datetime",
@@ -5062,9 +5088,22 @@
               "DisplayName": "<display-name>",
               "ID": "<owner-id>"
             },
-            "Size": 9,
+            "Size": 15,
             "StorageClass": "STANDARD",
-            "VersionId": "<version-id:2>"
+            "VersionId": "<version-id:3>"
+          },
+          {
+            "ETag": "\"eafcff1b58415aa1e09ab4891ca2fa8a\"",
+            "IsLatest": false,
+            "Key": "dir/subdir/test2",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 15,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:4>"
           }
         ],
         "ResponseMetadata": {
@@ -5083,7 +5122,7 @@
         "VersionIdMarker": "",
         "Versions": [
           {
-            "ETag": "\"6685cd62b95f2c58818cb20e7292168b\"",
+            "ETag": "\"56a8b2485f9683f70ea3316e6fa46be1\"",
             "IsLatest": true,
             "Key": "dir/subdir/test2",
             "LastModified": "datetime",
@@ -5091,9 +5130,22 @@
               "DisplayName": "<display-name>",
               "ID": "<owner-id>"
             },
-            "Size": 9,
+            "Size": 15,
             "StorageClass": "STANDARD",
-            "VersionId": "<version-id:2>"
+            "VersionId": "<version-id:3>"
+          },
+          {
+            "ETag": "\"eafcff1b58415aa1e09ab4891ca2fa8a\"",
+            "IsLatest": false,
+            "Key": "dir/subdir/test2",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 15,
+            "StorageClass": "STANDARD",
+            "VersionId": "<version-id:4>"
           }
         ],
         "ResponseMetadata": {

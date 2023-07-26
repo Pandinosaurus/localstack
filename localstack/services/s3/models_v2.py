@@ -1,6 +1,3 @@
-# TODO, for now, this file will contain only files for the new S3 provider but not compatible with persistence
-# it will then put in the other models file?
-# do something specific in the persistence file?
 import hashlib
 import logging
 from collections import defaultdict
@@ -327,11 +324,13 @@ class S3DeleteMarker:
     key: ObjectKey
     version_id: str
     last_modified: datetime
+    is_current: bool
 
-    def __init__(self, key: ObjectKey):
+    def __init__(self, key: ObjectKey, version_id: ObjectVersionId):
         self.key = key
-        self.version_id = "randomkk"  # TODO
+        self.version_id = version_id
         self.last_modified = datetime.now()
+        self.is_current = True
 
 
 class S3Part:
@@ -500,6 +499,9 @@ class KeyStore:
     def is_empty(self) -> bool:
         return not self._store
 
+    def values(self) -> list[S3Object | S3DeleteMarker]:
+        return [value for value in self._store.values()]
+
 
 class VersionedKeyStore:
     def __init__(self):
@@ -534,6 +536,9 @@ class VersionedKeyStore:
             self._store.pop(object_key)
 
         return object_version
+
+    def values(self) -> list[S3Object | S3DeleteMarker]:
+        return [object_version for values in self._store.values() for object_version in values]
 
     def is_empty(self) -> bool:
         return not self._store
