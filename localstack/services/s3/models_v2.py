@@ -36,6 +36,7 @@ from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRul
     ObjectLockLegalHoldStatus,
     ObjectLockMode,
     ObjectOwnership,
+    ObjectStorageClass,
     ObjectVersionId,
     Owner,
     PartNumber,
@@ -222,7 +223,7 @@ class S3Object:
     expiry: Optional[datetime]
     expires: Optional[datetime]
     expiration: Optional[datetime]
-    storage_class: StorageClass
+    storage_class: StorageClass | ObjectStorageClass
     encryption: Optional[ServerSideEncryption]
     kms_key_id: Optional[SSEKMSKeyId]
     bucket_key_enabled: Optional[bool]
@@ -371,7 +372,7 @@ class S3Multipart:
     def __init__(
         self,
         key: ObjectKey,
-        storage_class: StorageClass = StorageClass.STANDARD,
+        storage_class: StorageClass | ObjectStorageClass = StorageClass.STANDARD,
         expires: Optional[datetime] = None,
         expiration: Optional[datetime] = None,  # come from lifecycle
         checksum_algorithm: Optional[ChecksumAlgorithm] = None,
@@ -499,7 +500,7 @@ class KeyStore:
     def is_empty(self) -> bool:
         return not self._store
 
-    def values(self) -> list[S3Object | S3DeleteMarker]:
+    def values(self, *_, **__) -> list[S3Object | S3DeleteMarker]:
         return [value for value in self._store.values()]
 
 
@@ -537,8 +538,22 @@ class VersionedKeyStore:
 
         return object_version
 
-    def values(self) -> list[S3Object | S3DeleteMarker]:
-        return [object_version for values in self._store.values() for object_version in values]
+    def values(self, with_versions: bool = False) -> list[S3Object | S3DeleteMarker]:
+        if with_versions:
+            return [object_version for values in self._store.values() for object_version in values]
+
+        objects = []
+        for object_key, versions in self._store.items():
+            # we're getting the last set object in the versions dictionary
+            for version_id in reversed(versions):
+                current_object = versions[version_id]
+                if isinstance(current_object, S3DeleteMarker):
+                    break
+
+                objects.append(versions[version_id])
+                break
+
+        return objects
 
     def is_empty(self) -> bool:
         return not self._store

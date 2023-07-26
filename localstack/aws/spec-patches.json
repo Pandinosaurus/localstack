@@ -911,6 +911,23 @@
       "op": "add",
       "path": "/operations/PutBucketIntelligentTieringConfiguration/http/responseCode",
       "value": 204
+    },
+    {
+      "op": "add",
+      "path": "/shapes/BucketNotEmpty",
+      "value": {
+        "type": "structure",
+        "members": {
+          "BucketName": {
+            "shape": "BucketName"
+          }
+        },
+        "error": {
+          "httpStatusCode": 409
+        },
+        "documentation": "<p>The bucket you tried to delete is not empty</p>",
+        "exception": true
+      }
     }
   ]
 }

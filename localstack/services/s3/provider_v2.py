@@ -13,6 +13,7 @@ from localstack.aws.api.s3 import (
     BucketAlreadyExists,
     BucketAlreadyOwnedByYou,
     BucketName,
+    BucketNotEmpty,
     BypassGovernanceRetention,
     ChecksumAlgorithm,
     ChecksumCRC32,
@@ -37,6 +38,7 @@ from localstack.aws.api.s3 import (
     Delimiter,
     EncodingType,
     ETag,
+    FetchOwner,
     GetBucketLocationOutput,
     GetObjectAttributesOutput,
     GetObjectAttributesParts,
@@ -53,8 +55,11 @@ from localstack.aws.api.s3 import (
     KeyMarker,
     ListBucketsOutput,
     ListMultipartUploadsOutput,
+    ListObjectsOutput,
+    ListObjectsV2Output,
     ListObjectVersionsOutput,
     ListPartsOutput,
+    Marker,
     MaxKeys,
     MaxParts,
     MaxUploads,
@@ -62,6 +67,7 @@ from localstack.aws.api.s3 import (
     MultipartUploadId,
     NoSuchBucket,
     NoSuchUpload,
+    Object,
     ObjectKey,
     ObjectSize,
     ObjectVersion,
@@ -79,7 +85,9 @@ from localstack.aws.api.s3 import (
     SSECustomerAlgorithm,
     SSECustomerKey,
     SSECustomerKeyMD5,
+    StartAfter,
     StorageClass,
+    Token,
     UploadIdMarker,
     UploadPartCopyOutput,
     UploadPartCopyRequest,
@@ -91,7 +99,6 @@ from localstack.services.plugins import ServiceLifecycleHook
 from localstack.services.s3.codec import AwsChunkedDecoder
 from localstack.services.s3.constants import ARCHIVES_STORAGE_CLASSES, S3_CHUNK_SIZE
 from localstack.services.s3.exceptions import (
-    BucketNotEmpty,
     InvalidLocationConstraint,
     InvalidRequest,
     MalformedXML,
@@ -118,6 +125,7 @@ from localstack.services.s3.utils import (
     parse_range_header,
     validate_kms_key_id,
 )
+from localstack.utils.strings import to_str
 
 STORAGE_CLASSES = get_class_attrs_from_spec_class(StorageClass)
 
@@ -598,6 +606,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
+        # TODO test version ID "null" ???
+
         # TODO: try if specifying VersionId to a never versioned bucket??
         if s3_bucket.versioning_status is None:  # never been versioned TODO: test
             found_object = s3_bucket.objects.pop(key, None)
@@ -833,35 +843,216 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         return response
 
-    # def list_objects(
-    #     self,
-    #     context: RequestContext,
-    #     bucket: BucketName,
-    #     delimiter: Delimiter = None,
-    #     encoding_type: EncodingType = None,
-    #     marker: Marker = None,
-    #     max_keys: MaxKeys = None,
-    #     prefix: Prefix = None,
-    #     request_payer: RequestPayer = None,
-    #     expected_bucket_owner: AccountId = None,
-    # ) -> ListObjectsOutput:
-    #     pass
-    #
-    # def list_objects_v2(
-    #     self,
-    #     context: RequestContext,
-    #     bucket: BucketName,
-    #     delimiter: Delimiter = None,
-    #     encoding_type: EncodingType = None,
-    #     max_keys: MaxKeys = None,
-    #     prefix: Prefix = None,
-    #     continuation_token: Token = None,
-    #     fetch_owner: FetchOwner = None,
-    #     start_after: StartAfter = None,
-    #     request_payer: RequestPayer = None,
-    #     expected_bucket_owner: AccountId = None,
-    # ) -> ListObjectsV2Output:
-    #     pass
+    def list_objects(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        delimiter: Delimiter = None,
+        encoding_type: EncodingType = None,
+        marker: Marker = None,
+        max_keys: MaxKeys = None,
+        prefix: Prefix = None,
+        request_payer: RequestPayer = None,
+        expected_bucket_owner: AccountId = None,
+        optional_object_attributes: OptionalObjectAttributesList = None,
+    ) -> ListObjectsOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        # TODO: encode key in URL
+        common_prefixes = set()
+        count = 0
+        is_truncated = False
+        next_key_marker = None
+        max_keys = max_keys or 1000
+        prefix = prefix or ""
+
+        s3_objects: list[Object] = []
+
+        all_objects = s3_bucket.objects.values()
+        # sort by key
+        all_objects.sort(key=lambda r: r.key)
+
+        for s3_object in all_objects:
+            key = s3_object.key
+            # skip all keys that alphabetically come before key_marker
+            if marker:
+                if key <= marker:
+                    continue
+
+            # Filter for keys that start with prefix
+            if prefix and not key.startswith(prefix):
+                continue
+
+            # separate keys that contain the same string between the prefix and the first occurrence of the delimiter
+            if delimiter and delimiter in (key_no_prefix := key.removeprefix(prefix)):
+                pre_delimiter, _, _ = key_no_prefix.partition(delimiter)
+                prefix_including_delimiter = f"{prefix}{pre_delimiter}{delimiter}"
+
+                if prefix_including_delimiter not in common_prefixes:
+                    count += 1
+                    common_prefixes.add(prefix_including_delimiter)
+                continue
+
+            # TODO: add RestoreStatus if present
+            object_data = Object(
+                Key=s3_object.key,
+                ETag=f'"{s3_object.etag}"',
+                Owner=s3_bucket.owner,  # TODO: verify reality
+                Size=s3_object.size,
+                LastModified=s3_object.last_modified,
+                StorageClass=s3_object.storage_class,
+            )
+
+            if s3_object.checksum_algorithm:
+                object_data["ChecksumAlgorithm"] = [s3_object.checksum_algorithm]
+
+            s3_objects.append(object_data)
+
+            count += 1
+            if count >= max_keys:
+                is_truncated = True
+                next_key_marker = s3_object.key
+                break
+
+        common_prefixes = [CommonPrefix(Prefix=prefix) for prefix in sorted(common_prefixes)]
+
+        response = ListObjectsOutput(
+            IsTruncated=is_truncated,
+            Name=bucket,
+            MaxKeys=max_keys,
+            EncodingType=EncodingType.url,
+            Prefix=prefix or "",
+            Marker=marker or "",
+        )
+        if s3_objects:
+            response["Contents"] = s3_objects
+        if delimiter:
+            response["Delimiter"] = delimiter
+        if common_prefixes:
+            response["CommonPrefixes"] = common_prefixes
+        if delimiter and next_key_marker:
+            response["NextMarker"] = next_key_marker
+
+        # RequestCharged: Optional[RequestCharged]  # TODO
+        return response
+
+    def list_objects_v2(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        delimiter: Delimiter = None,
+        encoding_type: EncodingType = None,
+        max_keys: MaxKeys = None,
+        prefix: Prefix = None,
+        continuation_token: Token = None,
+        fetch_owner: FetchOwner = None,
+        start_after: StartAfter = None,
+        request_payer: RequestPayer = None,
+        expected_bucket_owner: AccountId = None,
+        optional_object_attributes: OptionalObjectAttributesList = None,
+    ) -> ListObjectsV2Output:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if continuation_token and continuation_token == "":
+            raise InvalidArgument("The continuation token provided is incorrect")
+
+        # TODO: encode key in URL
+        common_prefixes = set()
+        count = 0
+        is_truncated = False
+        next_continuation_token = None
+        max_keys = max_keys or 1000
+        prefix = prefix or ""
+        decoded_continuation_token = (
+            to_str(base64.urlsafe_b64decode(continuation_token.encode()))
+            if continuation_token
+            else None
+        )
+
+        s3_objects: list[Object] = []
+
+        all_objects = s3_bucket.objects.values()
+        # sort by key
+        all_objects.sort(key=lambda r: r.key)
+
+        for s3_object in all_objects:
+            key = s3_object.key
+            # skip all keys that alphabetically come before key_marker
+            # TODO: what if there's StartAfter AND ContinuationToken
+            if continuation_token:
+                if key < decoded_continuation_token:
+                    continue
+
+            if start_after:
+                if key < start_after:
+                    continue
+
+            # Filter for keys that start with prefix
+            if prefix and not key.startswith(prefix):
+                continue
+
+            # separate keys that contain the same string between the prefix and the first occurrence of the delimiter
+            if delimiter and delimiter in (key_no_prefix := key.removeprefix(prefix)):
+                pre_delimiter, _, _ = key_no_prefix.partition(delimiter)
+                prefix_including_delimiter = f"{prefix}{pre_delimiter}{delimiter}"
+
+                if prefix_including_delimiter not in common_prefixes:
+                    count += 1
+                    common_prefixes.add(prefix_including_delimiter)
+                continue
+
+            count += 1
+            if count > max_keys:
+                is_truncated = True
+                next_continuation_token = to_str(base64.urlsafe_b64encode(s3_object.key.encode()))
+                break
+
+            # TODO: add RestoreStatus if present
+            object_data = Object(
+                Key=s3_object.key,
+                ETag=f'"{s3_object.etag}"',
+                Size=s3_object.size,
+                LastModified=s3_object.last_modified,
+                StorageClass=s3_object.storage_class,
+            )
+
+            if fetch_owner:
+                object_data["Owner"] = s3_bucket.owner
+
+            if s3_object.checksum_algorithm:
+                object_data["ChecksumAlgorithm"] = [s3_object.checksum_algorithm]
+
+            s3_objects.append(object_data)
+
+        common_prefixes = [CommonPrefix(Prefix=prefix) for prefix in sorted(common_prefixes)]
+
+        response = ListObjectsV2Output(
+            IsTruncated=is_truncated,
+            Name=bucket,
+            MaxKeys=max_keys,
+            EncodingType=EncodingType.url,
+            Prefix=prefix or "",
+            KeyCount=count,
+        )
+        if s3_objects:
+            response["Contents"] = s3_objects
+        if delimiter:
+            response["Delimiter"] = delimiter
+        if common_prefixes:
+            response["CommonPrefixes"] = common_prefixes
+        if next_continuation_token:
+            response["NextContinuationToken"] = next_continuation_token
+        if continuation_token:
+            response["ContinuationToken"] = continuation_token
+        if start_after:
+            response["StartAfter"] = start_after
+
+        # RequestCharged: Optional[RequestCharged]  # TODO
+        return response
 
     def list_object_versions(
         self,
@@ -881,17 +1072,19 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
+        # TODO: encode key in URL
         common_prefixes = set()
         count = 0
         is_truncated = False
         next_key_marker = None
         next_version_id_marker = None
         max_keys = max_keys or 1000
+        prefix = prefix or ""
 
         object_versions: list[ObjectVersion] = []
         delete_markers: list[DeleteMarkerEntry] = []
 
-        all_versions = s3_bucket.objects.values()
+        all_versions = s3_bucket.objects.values(with_versions=True)
         # sort by key, and last-modified-date, to get the last version first
         all_versions.sort(key=lambda r: (r.key, r.last_modified))
 
@@ -964,7 +1157,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             Name=bucket,
             MaxKeys=max_keys,
             EncodingType=EncodingType.url,
-            Prefix=prefix or "",
+            Prefix=prefix,
             KeyMarker=key_marker or "",
             VersionIdMarker=version_id_marker or "",
         )

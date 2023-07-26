@@ -232,8 +232,6 @@ class BucketLocationConstraint(str):
     us_gov_west_1 = "us-gov-west-1"
     us_west_1 = "us-west-1"
     us_west_2 = "us-west-2"
-    ap_south_2 = "ap-south-2"
-    eu_south_2 = "eu-south-2"
 
 
 class BucketLogsPermission(str):
@@ -370,8 +368,6 @@ class InventoryOptionalField(str):
     IntelligentTieringAccessTier = "IntelligentTieringAccessTier"
     BucketKeyStatus = "BucketKeyStatus"
     ChecksumAlgorithm = "ChecksumAlgorithm"
-    ObjectAccessControlList = "ObjectAccessControlList"
-    ObjectOwner = "ObjectOwner"
 
 
 class JSONType(str):
@@ -799,6 +795,13 @@ class InvalidTargetBucketForLogging(ServiceException):
     sender_fault: bool = False
     status_code: int = 400
     TargetBucket: Optional[BucketName]
+
+
+class BucketNotEmpty(ServiceException):
+    code: str = "BucketNotEmpty"
+    sender_fault: bool = False
+    status_code: int = 409
+    BucketName: Optional[BucketName]
 
 
 AbortDate = datetime

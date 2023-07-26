@@ -3297,33 +3297,31 @@ class TestS3:
         assert content_vhost == content_path_style
 
     @markers.parity.aws_validated
-    @markers.snapshot.skip_snapshot_verify(paths=["$..Prefix"])
+    # @markers.snapshot.skip_snapshot_verify(paths=["$..Prefix"])
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..ContentLanguage", "$..VersionId"]
     )
-    def test_s3_put_more_than_1000_items(self, s3_create_bucket, snapshot, aws_client):
+    def test_s3_put_more_than_1000_items(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
-        bucket_name = "test" + short_uid()
-        s3_create_bucket(Bucket=bucket_name)
         for i in range(0, 1010, 1):
             body = "test-" + str(i)
             key = "test-key-" + str(i)
-            aws_client.s3.put_object(Bucket=bucket_name, Key=key, Body=body)
+            aws_client.s3.put_object(Bucket=s3_bucket, Key=key, Body=body)
 
         # trying to get the last item of 1010 items added.
-        resp = aws_client.s3.get_object(Bucket=bucket_name, Key="test-key-1009")
+        resp = aws_client.s3.get_object(Bucket=s3_bucket, Key="test-key-1009")
         snapshot.match("get_object-1009", resp)
 
         # trying to get the first item of 1010 items added.
-        resp = aws_client.s3.get_object(Bucket=bucket_name, Key="test-key-0")
+        resp = aws_client.s3.get_object(Bucket=s3_bucket, Key="test-key-0")
         snapshot.match("get_object-0", resp)
 
         # according docs for MaxKeys: the response might contain fewer keys but will never contain more.
         # AWS returns less during testing
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, MaxKeys=1010)
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, MaxKeys=1010)
         assert 1010 >= len(resp["Contents"])
 
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, Delimiter="/")
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, Delimiter="/")
         assert 1000 == len(resp["Contents"])
         # way too much content, remove it from this match
         snapshot.add_transformer(
@@ -3335,7 +3333,7 @@ class TestS3:
         next_marker = resp["NextMarker"]
 
         # Second list
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, Marker=next_marker)
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, Marker=next_marker)
         snapshot.match("list-objects-next_marker", resp)
         assert 10 == len(resp["Contents"])
 

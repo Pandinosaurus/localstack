@@ -313,5 +313,33 @@
         }
       }
     }
+  },
+  "tests/integration/s3/test_s3_api.py::TestS3BucketCRUD::test_delete_bucket_with_objects": {
+    "recorded-date": "27-07-2023, 00:25:16",
+    "recorded-content": {
+      "delete-with-obj": {
+        "Error": {
+          "BucketName": "<bucket-name:1>",
+          "Code": "BucketNotEmpty",
+          "Message": "The bucket you tried to delete is not empty"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 409
+        }
+      },
+      "delete-obj": {
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 204
+        }
+      },
+      "delete-bucket": {
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 204
+        }
+      }
+    }
   }
 }

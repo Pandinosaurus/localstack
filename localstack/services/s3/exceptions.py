@@ -31,8 +31,3 @@ class UnexpectedContent(CommonServiceException):
 class NoSuchConfiguration(CommonServiceException):
     def __init__(self, message=None):
         super().__init__("NoSuchConfiguration", status_code=404, message=message)
-
-
-class BucketNotEmpty(CommonServiceException):
-    def __init__(self, *args, **kwargs):
-        super().__init__("BucketNotEmpty", status_code=404, *args, **kwargs)
