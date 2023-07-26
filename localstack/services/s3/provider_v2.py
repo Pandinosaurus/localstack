@@ -80,6 +80,7 @@ from localstack.aws.api.s3 import (
     UploadPartRequest,
 )
 from localstack.services.plugins import ServiceLifecycleHook
+from localstack.services.s3.codec import AwsChunkedDecoder
 from localstack.services.s3.constants import ARCHIVES_STORAGE_CLASSES, S3_CHUNK_SIZE
 from localstack.services.s3.exceptions import (
     BucketNotEmpty,
@@ -306,23 +307,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: consolidate ACL into one, and validate it
 
-        # until then, try that
-        # get checksum value from request if present
-
-        # TODO: validate the algo?
-        checksum_algorithm = request.get("ChecksumAlgorithm")
-        checksum_value = (
-            request.get(f"Checksum{checksum_algorithm.upper()}") if checksum_algorithm else None
-        )
         # validate encryption values
 
         body = request.get("Body")
         # check if chunked request
         headers = context.request.headers
-        if headers.get("x-amz-content-sha256", "").startswith("STREAMING-"):
+        is_aws_chunked = headers.get("x-amz-content-sha256", "").startswith("STREAMING-")
+        if is_aws_chunked:
             decoded_content_length = int(headers.get("x-amz-decoded-content-length", 0))
-            # TODO:
-            body = body.read(decoded_content_length)
+            body = AwsChunkedDecoder(body, decoded_content_length)
+
             # TODO: AWS CHUNK DECODER HERE
 
         # TODO check if key already exist, and if it is locked?
@@ -335,6 +329,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             object_key=key,
             version_id=version_id,
         )
+        # TODO: validate the algo?
+        checksum_value = None
+        if checksum_algorithm := request.get("ChecksumAlgorithm"):
+            if is_aws_chunked:
+                checksum_value = body.trailing_headers.get(
+                    f"x-amz-checksum-{checksum_algorithm.lower()}"
+                )
+            else:
+                checksum_value = request.get(f"Checksum{checksum_algorithm.upper()}")
+
         size, etag, calculated_checksum_value = readinto_fileobj(body, fileobj, checksum_algorithm)
         if checksum_algorithm and calculated_checksum_value != checksum_value:
             self._storage_backend.delete_key_fileobj(bucket_name, key, version_id)
@@ -1055,19 +1059,24 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         body = request.get("Body")
         headers = context.request.headers
+        is_aws_chunked = headers.get("x-amz-content-sha256", "").startswith("STREAMING-")
         # check if chunked request
-        if headers.get("x-amz-content-sha256", "").startswith("STREAMING-"):
+        if is_aws_chunked:
             decoded_content_length = int(headers.get("x-amz-decoded-content-length", 0))
-            print(decoded_content_length)
-
-        checksum_algorithm = request.get("ChecksumAlgorithm")
-        checksum_value = (
-            request.get(f"Checksum{checksum_algorithm.upper()}") if checksum_algorithm else None
-        )
+            body = AwsChunkedDecoder(body, decoded_content_length)
 
         fileobj = self._storage_backend.get_part_fileobj(
             bucket_name=bucket_name, upload_id=upload_id, part_number=part_number
         )
+
+        checksum_value = None
+        if checksum_algorithm := request.get("ChecksumAlgorithm"):
+            if is_aws_chunked:
+                checksum_value = body.trailing_headers.get(
+                    f"x-amz-checksum-{checksum_algorithm.lower()}"
+                )
+            else:
+                checksum_value = request.get(f"Checksum{checksum_algorithm.upper()}")
 
         size, etag, calculated_checksum_value = readinto_fileobj(body, fileobj, checksum_algorithm)
         if checksum_algorithm and calculated_checksum_value != checksum_value:
