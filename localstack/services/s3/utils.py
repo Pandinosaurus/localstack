@@ -2,9 +2,9 @@ import datetime
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, Tuple, Type, Union, IO
 import zlib
+from dataclasses import dataclass
+from typing import IO, Any, Dict, Literal, Optional, Tuple, Type, Union
 from urllib import parse as urlparser
 from zoneinfo import ZoneInfo
 
@@ -22,10 +22,10 @@ from localstack.aws.api.s3 import (
     ChecksumAlgorithm,
     CopySource,
     InvalidArgument,
+    InvalidRange,
     LifecycleExpiration,
     LifecycleRule,
     LifecycleRules,
-    InvalidRange,
     Metadata,
     MethodNotAllowed,
     NoSuchBucket,
@@ -38,9 +38,9 @@ from localstack.aws.connect import connect_to
 from localstack.services.s3.constants import (
     S3_CHUNK_SIZE,
     S3_VIRTUAL_HOST_FORWARDED_HEADER,
-    SYSTEM_METADATA_SETTABLE_HEADERS,
     SIGNATURE_V2_PARAMS,
     SIGNATURE_V4_PARAMS,
+    SYSTEM_METADATA_SETTABLE_HEADERS,
     VALID_CANNED_ACLS_BUCKET,
 )
 from localstack.services.s3.exceptions import InvalidRequest
@@ -88,7 +88,7 @@ def get_owner_for_account_id(account_id: str):
 
 def extract_bucket_key_version_id_from_copy_source(
     copy_source: CopySource,
-) -> tuple[BucketName, ObjectKey, Optional[str]]:
+) -> tuple[BucketName, ObjectKey, Optional[ObjectVersionId]]:
     """
     Utility to parse bucket name, object key and optionally its versionId. It accepts the CopySource format:
     - <bucket-name/<object-key>?versionId=<version-id>, used for example in CopySource for CopyObject
@@ -319,22 +319,8 @@ def uses_host_addressing(headers: Dict[str, str]) -> bool:
     )
 
 
-def forwarded_from_virtual_host_addressed_request(headers: dict[str, str]) -> bool:
 def get_class_attrs_from_spec_class(spec_class: Type[str]):
     return {attr for attr in vars(spec_class) if not attr.startswith("__")}
-
-
-# def get_user_metadata_from_headers(headers: Headers) -> Metadata:
-#     metadata: Metadata = {}
-#
-#     for header in headers.keys():
-#         header_low = header.lower()
-#         if header_low.startswith("x-amz-meta"):
-#             meta_key = header_low
-#             metadata[meta_key] = (
-#                 headers[header][0] if type(headers[header]) == list else headers[header]
-#             )
-#     return metadata
 
 
 def get_system_metadata_from_request(request: dict) -> Metadata:
@@ -347,7 +333,7 @@ def get_system_metadata_from_request(request: dict) -> Metadata:
     return metadata
 
 
-def forwarded_from_virtual_host_addressed_request(headers: Dict[str, str]) -> bool:
+def forwarded_from_virtual_host_addressed_request(headers: dict[str, str]) -> bool:
     """
     Determines if the request was forwarded from a v-host addressing style into a path one
     """
