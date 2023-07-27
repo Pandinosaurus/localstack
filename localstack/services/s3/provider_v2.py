@@ -1,5 +1,7 @@
 import base64
+import datetime
 import hashlib
+import logging
 from secrets import token_urlsafe
 from typing import IO, Iterator, Optional
 
@@ -52,6 +54,7 @@ from localstack.aws.api.s3 import (
     HeadObjectRequest,
     InvalidArgument,
     InvalidBucketName,
+    InvalidObjectState,
     InvalidPartOrder,
     InvalidStorageClass,
     KeyMarker,
@@ -83,6 +86,8 @@ from localstack.aws.api.s3 import (
     PutObjectOutput,
     PutObjectRequest,
     RequestPayer,
+    RestoreObjectOutput,
+    RestoreRequest,
     S3Api,
     ServerSideEncryption,
     SSECustomerAlgorithm,
@@ -118,6 +123,7 @@ from localstack.services.s3.models_v2 import (
 )
 from localstack.services.s3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
 from localstack.services.s3.utils import (
+    add_expiration_days_to_datetime,
     extract_bucket_key_version_id_from_copy_source,
     get_class_attrs_from_spec_class,
     get_full_default_bucket_location,
@@ -129,6 +135,8 @@ from localstack.services.s3.utils import (
     validate_kms_key_id,
 )
 from localstack.utils.strings import to_str
+
+LOG = logging.getLogger(__name__)
 
 STORAGE_CLASSES = get_class_attrs_from_spec_class(StorageClass)
 
@@ -1318,18 +1326,47 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         return response
 
-    # def restore_object(
-    #     self,
-    #     context: RequestContext,
-    #     bucket: BucketName,
-    #     key: ObjectKey,
-    #     version_id: ObjectVersionId = None,
-    #     restore_request: RestoreRequest = None,
-    #     request_payer: RequestPayer = None,
-    #     checksum_algorithm: ChecksumAlgorithm = None,
-    #     expected_bucket_owner: AccountId = None,
-    # ) -> RestoreObjectOutput:
-    #     pass
+    def restore_object(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        key: ObjectKey,
+        version_id: ObjectVersionId = None,
+        restore_request: RestoreRequest = None,
+        request_payer: RequestPayer = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> RestoreObjectOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        s3_object = s3_bucket.get_object(
+            key=key,
+            version_id=version_id,
+            http_method="GET",  # TODO: verify http method
+        )
+        if s3_object.storage_class not in ARCHIVES_STORAGE_CLASSES:
+            raise InvalidObjectState(StorageClass=s3_object.storage_class)
+
+        # TODO: moto was only supported "Days" parameters from RestoreRequest, and was ignoring the others
+        # will only implement only the same functionality for now
+
+        # if a request was already done and the object was available, and we're updating it, set the status code to 200
+        status_code = 200 if s3_object.restore else 202
+        restore_days = restore_request.get("Days")
+        if not restore_days:
+            LOG.debug("LocalStack does not support restore SELECT requests yet.")
+            return RestoreObjectOutput()
+
+        restore_expiration_date = add_expiration_days_to_datetime(
+            datetime.datetime.utcnow(), restore_days
+        )
+        # TODO: add a way to transition from ongoing-request=true to false? for now it is instant
+        s3_object.restore = f'ongoing-request="false", expiry-date="{restore_expiration_date}"'
+
+        # TODO: request charged
+        return RestoreObjectOutput(StatusCode=status_code)
 
     @handler("CreateMultipartUpload", expand=False)
     def create_multipart_upload(

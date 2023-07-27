@@ -524,16 +524,28 @@ def str_to_rfc_1123_datetime(value: str) -> datetime.datetime:
     return datetime.datetime.strptime(value, RFC1123).replace(tzinfo=ZoneInfo("GMT"))
 
 
+def add_expiration_days_to_datetime(user_datatime: datetime.datetime, exp_days: int) -> str:
+    """
+    This adds expiration days to a datetime, rounding to the next day at midnight UTC.
+    :param user_datatime: datetime object
+    :param exp_days: provided days
+    :return: return a datetime object, rounded to midnight, in string formatted to rfc_1123
+    """
+    rounded_datetime = user_datatime.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + datetime.timedelta(days=exp_days + 1)
+
+    return rfc_1123_datetime(rounded_datetime)
+
+
 def serialize_expiration_header(
     rule_id: str, lifecycle_exp: LifecycleExpiration, last_modified: datetime.datetime
 ):
     if not (exp_date := lifecycle_exp.get("Date")):
         exp_days = lifecycle_exp.get("Days")
         # AWS round to the next day at midnight UTC
-        exp_date = last_modified.replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) + datetime.timedelta(days=exp_days + 1)
-    return f'expiry-date="{rfc_1123_datetime(exp_date)}", rule-id="{rule_id}"'
+        exp_date = add_expiration_days_to_datetime(last_modified, exp_days)
+    return f'expiry-date="{exp_date}", rule-id="{rule_id}"'
 
 
 def get_lifecycle_rule_from_object(

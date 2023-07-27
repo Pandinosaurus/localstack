@@ -44,6 +44,7 @@ from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRul
     Policy,
     PublicAccessBlockConfiguration,
     ReplicationConfiguration,
+    Restore,
     ServerSideEncryption,
     ServerSideEncryptionRule,
     Size,
@@ -67,7 +68,6 @@ from localstack.services.stores import (
 
 # for persistence, append the version id to the key name using a special symbol?? like __version_id__={version_id}
 
-# TODO: we need to make the SpooledTemporaryFile configurable for persistence?
 LOG = logging.getLogger(__name__)
 
 
@@ -138,7 +138,7 @@ class S3Bucket:
         self.object_ownership = object_ownership
         self.object_lock_enabled = object_lock_enabled_for_bucket
         self.encryption_rule = None  # TODO
-        self.creation_date = datetime.now()
+        self.creation_date = datetime.utcnow()
         self.multiparts = {}
         # we set the versioning status to None instead of False to be able to differentiate between a bucket which
         # was enabled at some point and one fresh bucket
@@ -220,7 +220,6 @@ class S3Object:
     user_metadata: Metadata  # TODO: check this?
     system_metadata: Metadata  # TODO: check this?
     last_modified: datetime
-    expiry: Optional[datetime]
     expires: Optional[datetime]
     expiration: Optional[datetime]
     storage_class: StorageClass | ObjectStorageClass
@@ -236,6 +235,7 @@ class S3Object:
     acl: Optional[str]  # TODO: we need to change something here, how it's done?
     is_current: bool
     parts: Optional[list[tuple[int, int]]]
+    restore: Optional[Restore]
 
     def __init__(
         self,
@@ -258,12 +258,9 @@ class S3Object:
         lock_until: Optional[datetime] = None,
         website_redirect_location: Optional[WebsiteRedirectLocation] = None,
         acl: Optional[str] = None,  # TODO
-        expiry: Optional[datetime] = None,  # TODO
-        # parts: Optional[list[tuple[str, str]]] = None,  # TODO: maybe remove?
     ):
         self.key = key
         self.user_metadata = {k.lower(): v for k, v in user_metadata.items()}
-        # self.user_metadata = user_metadata
         self.system_metadata = system_metadata
         self.version_id = version_id
         self.storage_class = storage_class or StorageClass.STANDARD
@@ -280,14 +277,12 @@ class S3Object:
         self.lock_legal_status = lock_legal_status
         self.lock_until = lock_until
         self.acl = acl
-        self.expiry = expiry
         self.expiration = expiration
         self.website_redirect_location = website_redirect_location
         self.is_current = True
-        self.last_modified = datetime.now()
-        # self._set_value_from_stream(value, buffer)
-        # self.parts = parts
+        self.last_modified = datetime.utcnow()
         self.parts = []
+        self.restore = None
 
     def get_system_metadata_fields(self):
         headers = Headers()
@@ -330,7 +325,7 @@ class S3DeleteMarker:
     def __init__(self, key: ObjectKey, version_id: ObjectVersionId):
         self.key = key
         self.version_id = version_id
-        self.last_modified = datetime.now()
+        self.last_modified = datetime.utcnow()
         self.is_current = True
 
 
@@ -350,7 +345,7 @@ class S3Part:
         checksum_algorithm: Optional[ChecksumAlgorithm] = None,
         checksum_value: Optional[str] = None,
     ):
-        self.last_modified = datetime.now()
+        self.last_modified = datetime.utcnow()
         self.part_number = part_number
         self.size = size
         self.etag = etag
@@ -384,13 +379,12 @@ class S3Multipart:
         lock_until: Optional[datetime] = None,
         website_redirect_location: Optional[WebsiteRedirectLocation] = None,
         acl: Optional[str] = None,  # TODO
-        expiry: Optional[datetime] = None,  # TODO
         user_metadata: Optional[Metadata] = None,
         system_metadata: Optional[Metadata] = None,
         initiator: Optional[Owner] = None,
     ):
         self.id = token_urlsafe(10)  # TODO
-        self.initiated = datetime.now()
+        self.initiated = datetime.utcnow()
         self.parts = {}
         self.initiator = initiator
         self.checksum_value = None
@@ -410,7 +404,6 @@ class S3Multipart:
             lock_until=lock_until,
             website_redirect_location=website_redirect_location,
             acl=acl,
-            expiry=expiry,
         )
 
     # TODO: get the part list from the storage engine as well?
