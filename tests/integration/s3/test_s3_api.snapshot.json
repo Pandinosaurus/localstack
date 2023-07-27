@@ -165,7 +165,7 @@
     }
   },
   "tests/integration/s3/test_s3_api.py::TestS3ObjectCRUD::test_delete_object": {
-    "recorded-date": "15-06-2023, 21:59:19",
+    "recorded-date": "27-07-2023, 01:10:35",
     "recorded-content": {
       "put-object": {
         "ETag": "\"a9a43d6b467d3dc6514412c3a4987415\"",
@@ -186,6 +186,18 @@
           "HTTPHeaders": {},
           "HTTPStatusCode": 204
         }
+      },
+      "delete-nonexistent-object-versionid": {
+        "Error": {
+          "ArgumentName": "versionId",
+          "ArgumentValue": "HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD",
+          "Code": "InvalidArgument",
+          "Message": "Invalid version id specified"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
       }
     }
   },
@@ -194,7 +206,7 @@
     "recorded-content": {}
   },
   "tests/integration/s3/test_s3_api.py::TestS3ObjectCRUD::test_get_object_with_version_unversioned_bucket": {
-    "recorded-date": "25-07-2023, 22:48:23",
+    "recorded-date": "27-07-2023, 00:53:12",
     "recorded-content": {
       "put-object": {
         "ETag": "\"a8b14b49cca6ee9a2dc6e28f87cc542c\"",
@@ -214,6 +226,20 @@
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 400
+        }
+      },
+      "get-obj-with-null-version": {
+        "AcceptRanges": "bytes",
+        "Body": "test-version",
+        "ContentLength": 12,
+        "ContentType": "binary/octet-stream",
+        "ETag": "\"a8b14b49cca6ee9a2dc6e28f87cc542c\"",
+        "LastModified": "datetime",
+        "Metadata": {},
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
         }
       }
     }
@@ -338,6 +364,126 @@
         "ResponseMetadata": {
           "HTTPHeaders": {},
           "HTTPStatusCode": 204
+        }
+      }
+    }
+  },
+  "tests/integration/s3/test_s3_api.py::TestS3ObjectCRUD::test_delete_objects": {
+    "recorded-date": "27-07-2023, 02:01:09",
+    "recorded-content": {
+      "put-object": {
+        "ETag": "\"a9a43d6b467d3dc6514412c3a4987415\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-object-wrong-version-id": {
+        "Errors": [
+          {
+            "Code": "NoSuchVersion",
+            "Key": "test-delete",
+            "Message": "The specified version does not exist.",
+            "VersionId": "HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-objects": {
+        "Deleted": [
+          {
+            "Key": "a-wrong-key"
+          },
+          {
+            "Key": "c-wrong-key"
+          },
+          {
+            "Key": "test-delete"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/integration/s3/test_s3_api.py::TestS3ObjectCRUD::test_delete_objects_versioned": {
+    "recorded-date": "27-07-2023, 01:49:47",
+    "recorded-content": {
+      "put-object": {
+        "ETag": "\"a9a43d6b467d3dc6514412c3a4987415\"",
+        "ServerSideEncryption": "AES256",
+        "VersionId": "<version-id:1>",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-objects-no-version-id": {
+        "Deleted": [
+          {
+            "DeleteMarker": true,
+            "DeleteMarkerVersionId": "<version-id:2>",
+            "Key": "wrongkey"
+          },
+          {
+            "DeleteMarker": true,
+            "DeleteMarkerVersionId": "<delete-marker-version-id:1>",
+            "Key": "test-delete"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-objects-marker": {
+        "Deleted": [
+          {
+            "Key": "test-delete",
+            "VersionId": "<version-id:2>"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-objects-wrong-version-id": {
+        "Errors": [
+          {
+            "Code": "NoSuchVersion",
+            "Key": "wrong-key-2",
+            "Message": "The specified version does not exist.",
+            "VersionId": "<version-id:3>"
+          },
+          {
+            "Code": "NoSuchVersion",
+            "Key": "test-delete",
+            "Message": "The specified version does not exist.",
+            "VersionId": "<version-id:3>"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "delete-objects-version-id": {
+        "Deleted": [
+          {
+            "Key": "test-delete",
+            "VersionId": "<version-id:1>"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
         }
       }
     }

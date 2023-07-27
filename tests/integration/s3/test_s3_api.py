@@ -1,3 +1,5 @@
+from operator import itemgetter
+
 import pytest
 from botocore.exceptions import ClientError
 
@@ -68,6 +70,40 @@ class TestS3ObjectCRUD:
 
         delete_object_2 = aws_client.s3.delete_object(Bucket=s3_bucket, Key=key_name)
         snapshot.match("delete-nonexistent-object", delete_object_2)
+
+        with pytest.raises(ClientError) as e:
+            aws_client.s3.delete_object(
+                Bucket=s3_bucket, Key=key_name, VersionId="HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD"
+            )
+        snapshot.match("delete-nonexistent-object-versionid", e.value.response)
+
+    def test_delete_objects(self, s3_bucket, aws_client, snapshot):
+        key_name = "test-delete"
+        put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-delete")
+        snapshot.match("put-object", put_object)
+
+        delete_objects = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [{"Key": key_name, "VersionId": "HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD"}]
+            },
+        )
+
+        snapshot.match("delete-object-wrong-version-id", delete_objects)
+
+        delete_objects = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [
+                    {"Key": key_name},
+                    {"Key": "c-wrong-key"},
+                    {"Key": "a-wrong-key"},
+                ]
+            },
+        )
+        delete_objects["Deleted"].sort(key=itemgetter("Key"))
+
+        snapshot.match("delete-objects", delete_objects)
 
     def test_delete_object_versioned(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())
@@ -166,6 +202,78 @@ class TestS3ObjectCRUD:
         delete_wrong_key = aws_client.s3.delete_object(Bucket=s3_bucket, Key="wrong-key")
         snapshot.match("delete-wrong-key", delete_wrong_key)
 
+    def test_delete_objects_versioned(self, s3_bucket, aws_client, snapshot):
+        snapshot.add_transformer(snapshot.transform.s3_api())
+        snapshot.add_transformer(snapshot.transform.key_value("DeleteMarkerVersionId"))
+        # enable versioning on the bucket
+        aws_client.s3.put_bucket_versioning(
+            Bucket=s3_bucket, VersioningConfiguration={"Status": "Enabled"}
+        )
+
+        key_name = "test-delete"
+        put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-delete")
+        snapshot.match("put-object", put_object)
+        object_version_id = put_object["VersionId"]
+
+        delete_objects = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [
+                    {"Key": key_name},
+                    {"Key": "wrongkey"},
+                ]
+            },
+        )
+        snapshot.match("delete-objects-no-version-id", delete_objects)
+        delete_marker_version_id = delete_objects["Deleted"][0]["DeleteMarkerVersionId"]
+
+        # delete a DeleteMarker directly
+        delete_objects_marker = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [
+                    {
+                        "Key": key_name,
+                        "VersionId": delete_marker_version_id,
+                    }
+                ]
+            },
+        )
+        snapshot.match("delete-objects-marker", delete_objects_marker)
+
+        # delete with a fake VersionId
+        delete_objects = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [
+                    {
+                        "Key": key_name,
+                        "VersionId": "HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD",
+                    },
+                    {
+                        "Key": "wrong-key-2",
+                        "VersionId": "HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD",
+                    },
+                ]
+            },
+        )
+
+        snapshot.match("delete-objects-wrong-version-id", delete_objects)
+
+        # delete the object directly, without setting a DeleteMarker
+        delete_objects_marker = aws_client.s3.delete_objects(
+            Bucket=s3_bucket,
+            Delete={
+                "Objects": [
+                    {
+                        "Key": key_name,
+                        "VersionId": object_version_id,
+                    }
+                ]
+            },
+        )
+        snapshot.match("delete-objects-version-id", delete_objects_marker)
+
     def test_delete_object_locked(self):
         pass
 
@@ -184,6 +292,9 @@ class TestS3ObjectCRUD:
                 Bucket=s3_bucket, Key=key_name, VersionId="HPniJFCxqTsMuIH9KX8K8wEjNUgmABCD"
             )
         snapshot.match("get-obj-with-version", e.value.response)
+
+        get_obj = aws_client.s3.get_object(Bucket=s3_bucket, Key=key_name, VersionId="null")
+        snapshot.match("get-obj-with-null-version", get_obj)
 
     def test_list_object_versions_order_unversioned(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())

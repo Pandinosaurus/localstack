@@ -165,7 +165,7 @@ class S3Bucket:
         """
 
         if self.versioning_status is None:
-            if version_id:
+            if version_id and version_id != "null":
                 raise InvalidArgument(
                     "Invalid version id specified",
                     ArgumentName="versionId",
@@ -525,11 +525,9 @@ class VersionedKeyStore:
     def pop(
         self, object_key: ObjectKey, version_id: ObjectVersionId = None, default=None
     ) -> S3Object | S3DeleteMarker | None:
-        # TODO: implement this, what if no version_id? is it possible??
         versions = self._store.get(object_key)
         if not versions:
-            # TODO: is that possible??
-            return
+            return None
 
         # TODO: pop key if empty?
         object_version = versions.pop(version_id, default)
@@ -557,142 +555,6 @@ class VersionedKeyStore:
 
     def is_empty(self) -> bool:
         return not self._store
-
-
-#
-#
-# class _VersionedKeyStore(dict):  # type: ignore
-#
-#     """A modified version of Moto's `_VersionedKeyStore`"""
-#
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self._stored_versions = defaultdict(set)
-#         self._lock = threading.RLock()
-#
-#     def get_versions_for_key(self, key: str) -> set[str]:
-#         return self._stored_versions.get(key)
-#
-#     def __sgetitem__(self, key: str) -> list[S3Object | S3DeleteMarker]:
-#         return super().__getitem__(key)
-#
-#     def __getitem__(self, key: str) -> S3Object | S3DeleteMarker:
-#         return self.__sgetitem__(key)[-1]
-#
-#     def __setitem__(self, key: str, value: S3Object | S3DeleteMarker) -> None:
-#         try:
-#             current = self.__sgetitem__(key)
-#             current.append(value)
-#         except (KeyError, IndexError):
-#             current = [value]
-#
-#         super().__setitem__(key, current)
-#         if value.version_id:
-#             self._stored_versions[key].add(value.version_id)
-#
-#     def pop(
-#         self, key: str, default: S3Object | S3DeleteMarker = None
-#     ) -> list[S3Object | S3DeleteMarker]:
-#         value = super().pop(key, None)
-#         if not value:
-#             return [default]
-#         self._stored_versions.pop(key, None)
-#         return value
-#
-#     def get(self, key: str, default: S3Object | S3DeleteMarker = None) -> S3Object | S3DeleteMarker:
-#         """
-#         :param key: the ObjectKey
-#         :param default: default return value if the key is not present
-#         :return: the current (last version) S3Object or DeleteMarker
-#         """
-#         try:
-#             return self[key]
-#         except (KeyError, IndexError):
-#             pass
-#         return default
-#
-#     def setdefault(
-#         self, key: str, default: S3Object | S3DeleteMarker = None
-#     ) -> S3Object | S3DeleteMarker:
-#         try:
-#             return self[key]
-#         except (KeyError, IndexError):
-#             self[key] = default
-#         return default
-#
-#     # TODO: could it actually append one version on top instead? hmm
-#     def set_last_version(self, key: str, value: S3Object | S3DeleteMarker) -> None:
-#         try:
-#             self.__sgetitem__(key)[-1] = value
-#         except (KeyError, IndexError):
-#             super().__setitem__(key, [value])
-#
-#     def get_version(
-#         self, key: str, version_id: str, default: S3Object | S3DeleteMarker = None
-#     ) -> Optional[S3Object | S3DeleteMarker]:
-#         s3_object_versions = self.getlist(key=key, default=default)
-#         if not s3_object_versions:
-#             return default
-#
-#         for s3_object_version in s3_object_versions:
-#             if s3_object_version.version_id == version_id:
-#                 return s3_object_version
-#
-#         return None
-#
-#     def getlist(
-#         self, key: str, default: list[S3Object | S3DeleteMarker] = None
-#     ) -> list[S3Object | S3DeleteMarker]:
-#         try:
-#             return self.__sgetitem__(key)
-#         except (KeyError, IndexError):
-#             pass
-#         return default
-#
-#     def setlist(self, key: str, _list: list[S3Object | S3DeleteMarker]) -> None:
-#         for value in _list:
-#             if value.version_id:
-#                 self._stored_versions[key].add(value.version_id)
-#
-#         if _list:
-#             super().__setitem__(key, _list)
-#         else:
-#             self.pop(key)
-#
-#     def _iteritems(self) -> Iterator[tuple[str, S3Object | S3DeleteMarker]]:
-#         for key in self._self_iterable():
-#             yield key, self[key]
-#
-#     def _itervalues(self) -> Iterator[S3Object | S3DeleteMarker]:
-#         for key in self._self_iterable():
-#             yield self[key]
-#
-#     def _iterlists(self) -> Iterator[tuple[str, list[S3Object | S3DeleteMarker]]]:
-#         for key in self._self_iterable():
-#             yield key, self.getlist(key)
-#
-#     def item_size(self) -> int:
-#
-#         size = sum(key.size for key in self.values())
-#         return size
-#         # size = 0
-#         # for val in self._self_iterable().values():
-#         #     # TODO: not sure about that, especially storage values from tempfile?
-#         #     # Should we iterate on key.size instead? and on every version? because we don't store diff or anything?
-#         #     # not sure
-#         #     size += val.size
-#         #     # size += sys.getsizeof(val)
-#         # return size
-#
-#     def _self_iterable(self) -> dict[str, S3Object | S3DeleteMarker]:
-#         # TODO: locking
-#         #  to enable concurrency, return a copy, to avoid "dictionary changed size during iteration"
-#         #  TODO: look into replacing with a locking mechanism, potentially
-#         return dict(self)
-#
-#     items = iteritems = _iteritems
-#     lists = iterlists = _iterlists
-#     values = itervalues = _itervalues
 
 
 class S3StoreV2(BaseStore):

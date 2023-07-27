@@ -32,11 +32,13 @@ from localstack.aws.api.s3 import (
     CreateMultipartUploadOutput,
     CreateMultipartUploadRequest,
     Delete,
+    DeletedObject,
     DeleteMarkerEntry,
     DeleteObjectOutput,
     DeleteObjectsOutput,
     Delimiter,
     EncodingType,
+    Error,
     ETag,
     FetchOwner,
     GetBucketLocationOutput,
@@ -68,6 +70,7 @@ from localstack.aws.api.s3 import (
     NoSuchBucket,
     NoSuchUpload,
     Object,
+    ObjectIdentifier,
     ObjectKey,
     ObjectSize,
     ObjectVersion,
@@ -606,13 +609,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
-        # TODO test version ID "null" ???
+        if s3_bucket.versioning_status is None:
+            if version_id and version_id != "null":
+                raise InvalidArgument(
+                    "Invalid version id specified",
+                    ArgumentName="versionId",
+                    ArgumentValue=version_id,
+                )
 
-        # TODO: try if specifying VersionId to a never versioned bucket??
-        if s3_bucket.versioning_status is None:  # never been versioned TODO: test
             found_object = s3_bucket.objects.pop(key, None)
             # TODO: RequestCharged
-            # TODO: delete the real fileobject under if key
             if found_object:
                 self._storage_backend.delete_key_fileobj(bucket_name=bucket, object_key=key)
             return DeleteObjectOutput()
@@ -627,7 +633,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             s3_bucket.objects.set(key, delete_marker)
             return DeleteObjectOutput(VersionId=delete_marker.version_id, DeleteMarker=True)
 
-        # TODO: put all above??
         if key not in s3_bucket.objects:
             return DeleteObjectOutput()
 
@@ -656,11 +661,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         return response
 
-    # @handler("DeleteObjects", expand=False)
     def delete_objects(
         self,
         context: RequestContext,
-        # request: DeleteObjectsRequest,
         bucket: BucketName,
         delete: Delete,
         mfa: MFA = None,
@@ -669,7 +672,100 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         expected_bucket_owner: AccountId = None,
         checksum_algorithm: ChecksumAlgorithm = None,
     ) -> DeleteObjectsOutput:
-        pass
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        objects: list[ObjectIdentifier] = delete.get("Objects")
+        if not objects:
+            raise MalformedXML()
+
+        # TODO: max 1000 delete at once? test against AWS?
+        # TODO: implement ByPassGovernance
+        # TODO: implement Locking error
+
+        quiet = delete.get("Quiet", False)
+        deleted = []
+        errors = []
+
+        for to_delete_object in objects:
+            # TODO: beware of key encoding (XML?)
+            object_key = to_delete_object.get("Key")
+            version_id = to_delete_object.get("VersionId")
+            if s3_bucket.versioning_status is None:
+                if version_id and version_id != "null":
+                    errors.append(
+                        Error(
+                            Code="NoSuchVersion",
+                            Key=object_key,
+                            Message="The specified version does not exist.",
+                            VersionId=version_id,
+                        )
+                    )
+                    continue
+
+                found_object = s3_bucket.objects.pop(object_key, None)
+                if found_object:
+                    self._storage_backend.delete_key_fileobj(
+                        bucket_name=bucket, object_key=object_key
+                    )
+
+                if not quiet:
+                    deleted.append(DeletedObject(Key=object_key))
+
+                continue
+
+            if not version_id:
+                delete_marker_id = generate_version_id(s3_bucket.versioning_status)
+                delete_marker = S3DeleteMarker(key=object_key, version_id=delete_marker_id)
+                # TODO: verify with Suspended bucket? does it override last version or still append?? big question
+                # I think it puts a delete marker with a `null` VersionId, which deletes the object under
+                # append the DeleteMaker to the objects stack
+                # if the key does not exist already, AWS does not care and just append a DeleteMarker anyway
+                s3_bucket.objects.set(object_key, delete_marker)
+                if not quiet:
+                    deleted.append(
+                        DeletedObject(
+                            DeleteMarker=True,
+                            DeleteMarkerVersionId=delete_marker_id,
+                            Key=object_key,
+                        )
+                    )
+                continue
+
+            if not (
+                found_object := s3_bucket.objects.pop(object_key=object_key, version_id=version_id)
+            ):
+                errors.append(
+                    Error(
+                        Code="NoSuchVersion",
+                        Key=object_key,
+                        Message="The specified version does not exist.",
+                        VersionId=version_id,
+                    )
+                )
+                continue
+
+            if not quiet:
+                deleted_object = DeletedObject(
+                    Key=object_key,
+                    VersionId=version_id,
+                )
+                deleted.append(deleted_object)
+
+            if isinstance(found_object, S3Object):
+                self._storage_backend.delete_key_fileobj(
+                    bucket_name=bucket, object_key=object_key, version_id=version_id
+                )
+
+        # TODO: request charged
+        response: DeleteObjectsOutput = {}
+        if errors:
+            response["Errors"] = errors
+        if not quiet:
+            response["Deleted"] = deleted
+
+        return response
 
     @handler("CopyObject", expand=False)
     def copy_object(
