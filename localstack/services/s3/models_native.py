@@ -1,8 +1,10 @@
+import hashlib
 import logging
 from collections import defaultdict
 from datetime import datetime
 from io import RawIOBase
-from typing import IO, Any, Literal, Optional, Union
+from secrets import token_urlsafe
+from typing import IO, Literal, Optional, Union
 
 from werkzeug.datastructures.headers import Headers
 
@@ -15,6 +17,7 @@ from localstack.aws.api.s3 import (
     BucketName,
     BucketRegion,
     ChecksumAlgorithm,
+    CompletedPartList,
     CORSConfiguration,
     ETag,
     Expiration,
@@ -37,6 +40,7 @@ from localstack.aws.api.s3 import (
     ObjectStorageClass,
     ObjectVersionId,
     Owner,
+    PartNumber,
     Payer,
     Policy,
     PublicAccessBlockConfiguration,
@@ -50,6 +54,7 @@ from localstack.aws.api.s3 import (
     WebsiteConfiguration,
     WebsiteRedirectLocation,
 )
+from localstack.services.s3.constants import S3_CHUNK_SIZE, S3_UPLOAD_PART_MIN_SIZE
 from localstack.services.s3.storage import LockedSpooledTemporaryFile
 from localstack.services.s3.utils import (
     ParsedRange,
@@ -76,7 +81,7 @@ class S3Bucket:
     bucket_account_id: AccountId
     bucket_region: BucketRegion
     creation_date: datetime
-    multiparts: dict[MultipartUploadId, Any]  # TODO
+    multiparts: dict[MultipartUploadId, "S3Multipart"]
     objects: Union["KeyStore", "VersionedKeyStore"]
     versioning_status: Literal[None, "Enabled", "Disabled"]
     lifecycle_rules: LifecycleRules
@@ -307,6 +312,152 @@ class S3DeleteMarker:
         self.version_id = version_id
         self.last_modified = datetime.utcnow()
         self.is_current = True
+
+
+class S3Part:
+    part_number: PartNumber
+    etag: ETag
+    last_modified: datetime
+    size: int
+    checksum_algorithm: Optional[ChecksumAlgorithm]
+    checksum_value: Optional[str]
+
+    def __init__(
+        self,
+        part_number: PartNumber,
+        size: int,
+        etag: ETag,
+        checksum_algorithm: Optional[ChecksumAlgorithm] = None,
+        checksum_value: Optional[str] = None,
+    ):
+        self.last_modified = datetime.utcnow()
+        self.part_number = part_number
+        self.size = size
+        self.etag = etag
+        self.checksum_algorithm = checksum_algorithm
+        self.checksum_value = checksum_value
+
+    @property
+    def etag_header(self) -> str:
+        return f'"{self.etag}"'
+
+
+class S3Multipart:
+    parts: dict[PartNumber, S3Part]
+    object: S3Object
+    upload_id: MultipartUploadId
+    checksum_value: Optional[str]
+    initiated: datetime
+
+    def __init__(
+        self,
+        key: ObjectKey,
+        storage_class: StorageClass | ObjectStorageClass = StorageClass.STANDARD,
+        expires: Optional[datetime] = None,
+        expiration: Optional[datetime] = None,  # come from lifecycle
+        checksum_algorithm: Optional[ChecksumAlgorithm] = None,
+        encryption: Optional[ServerSideEncryption] = None,  # inherit bucket
+        kms_key_id: Optional[SSEKMSKeyId] = None,  # inherit bucket
+        bucket_key_enabled: bool = False,  # inherit bucket
+        lock_mode: Optional[ObjectLockMode] = None,  # inherit bucket
+        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,  # inherit bucket
+        lock_until: Optional[datetime] = None,
+        website_redirect_location: Optional[WebsiteRedirectLocation] = None,
+        acl: Optional[str] = None,  # TODO
+        user_metadata: Optional[Metadata] = None,
+        system_metadata: Optional[Metadata] = None,
+        initiator: Optional[Owner] = None,
+    ):
+        self.id = token_urlsafe(10)  # TODO
+        self.initiated = datetime.utcnow()
+        self.parts = {}
+        self.initiator = initiator
+        self.checksum_value = None
+        self.object = S3Object(
+            key=key,
+            user_metadata=user_metadata,
+            system_metadata=system_metadata,
+            storage_class=storage_class or StorageClass.STANDARD,
+            expires=expires,
+            expiration=expiration,
+            checksum_algorithm=checksum_algorithm,
+            encryption=encryption,
+            kms_key_id=kms_key_id,
+            bucket_key_enabled=bucket_key_enabled,
+            lock_mode=lock_mode,
+            lock_legal_status=lock_legal_status,
+            lock_until=lock_until,
+            website_redirect_location=website_redirect_location,
+            acl=acl,
+        )
+
+    # TODO: get the part list from the storage engine as well?
+    def complete_multipart(
+        self,
+        parts: CompletedPartList,
+        buffer: LockedSpooledTemporaryFile,
+        parts_buffers: list[LockedSpooledTemporaryFile],
+    ):
+        last_part_index = len(parts) - 1
+        if self.object.checksum_algorithm:
+            checksum_key = f"Checksum{self.object.checksum_algorithm.upper()}"
+        object_etag = hashlib.md5(usedforsecurity=False)
+
+        pos = 0
+        for index, part in enumerate(parts):
+            part_number = part["PartNumber"]
+            part_etag = part["ETag"]
+            # TODO: verify checksum part, maybe from the algo?
+            part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
+
+            s3_part = self.parts.get(part_number)
+            # TODO: verify etag format here
+            if not s3_part or s3_part.etag != part_etag.strip('"'):
+                with buffer.lock:
+                    buffer.seek(0)
+                    buffer.truncate()
+                # raise InvalidPart()
+                raise
+            # TODO: validate this?
+            if part_checksum and part_checksum != s3_part.checksum_value:
+                with buffer.lock:
+                    buffer.seek(0)
+                    buffer.truncate()
+                # raise InvalidPart()
+                raise
+            if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
+                with buffer.lock:
+                    buffer.seek(0)
+                    buffer.truncate()
+                # raise EntityTooSmall()
+                raise
+
+            stream_value = parts_buffers[index]
+
+            with stream_value.lock, buffer.lock:
+                while data := stream_value.read(S3_CHUNK_SIZE):
+                    buffer.write(data)
+                    pos += len(data)
+
+            object_etag.update(bytes.fromhex(s3_part.etag))
+            self.object.parts.append((pos, s3_part.size))
+
+        multipart_etag = f"{object_etag.hexdigest()}-{len(parts)}"
+        self.object.etag = multipart_etag
+        with buffer.lock:
+            buffer.seek(0, 2)
+            self.object.size = buffer.tell()
+            buffer.seek(0)
+
+        # free the space before the garbage collection, just to be faster
+        # TODO: clear the parts_buffers in the provider from the StorageBackend
+        # for part in self.parts.values():
+        #     part.value.close()
+
+        # now the full data should be in self.object.value, and the etag set
+        # we can now properly retrieve the S3Object from the S3Multipart, set it as its own key
+        # and delete the multipart
+        # TODO: set the parts list to support `PartNumber` in GetObject !!
 
 
 # TODO: use SynchronizedDefaultDict to prevent updates during iteration?
