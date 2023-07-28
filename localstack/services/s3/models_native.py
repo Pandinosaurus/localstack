@@ -301,6 +301,7 @@ class S3Object:
         return f'"{self.etag}"'
 
 
+# TODO: could use dataclass, validate after models are set
 class S3DeleteMarker:
     key: ObjectKey
     version_id: str
@@ -314,6 +315,7 @@ class S3DeleteMarker:
         self.is_current = True
 
 
+# TODO: could use dataclass, validate after models are set
 class S3Part:
     part_number: PartNumber
     etag: ETag
@@ -338,7 +340,7 @@ class S3Part:
         self.checksum_value = checksum_value
 
     @property
-    def etag_header(self) -> str:
+    def quoted_etag(self) -> str:
         return f'"{self.etag}"'
 
 
@@ -359,8 +361,8 @@ class S3Multipart:
         encryption: Optional[ServerSideEncryption] = None,  # inherit bucket
         kms_key_id: Optional[SSEKMSKeyId] = None,  # inherit bucket
         bucket_key_enabled: bool = False,  # inherit bucket
-        lock_mode: Optional[ObjectLockMode] = None,  # inherit bucket
-        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,  # inherit bucket
+        lock_mode: Optional[ObjectLockMode] = None,
+        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,
         lock_until: Optional[datetime] = None,
         website_redirect_location: Optional[WebsiteRedirectLocation] = None,
         acl: Optional[str] = None,  # TODO
@@ -368,7 +370,7 @@ class S3Multipart:
         system_metadata: Optional[Metadata] = None,
         initiator: Optional[Owner] = None,
     ):
-        self.id = token_urlsafe(10)  # TODO
+        self.id = token_urlsafe(10)  # TODO, validate format, could it be b64 urlsafe encoded?
         self.initiated = datetime.utcnow()
         self.parts = {}
         self.initiator = initiator
@@ -391,44 +393,42 @@ class S3Multipart:
             acl=acl,
         )
 
-    # TODO: get the part list from the storage engine as well?
     def complete_multipart(
         self,
         parts: CompletedPartList,
         buffer: LockedSpooledTemporaryFile,
         parts_buffers: list[LockedSpooledTemporaryFile],
     ):
+        def reset_buffer():
+            with buffer.lock:
+                buffer.seek(0)
+                buffer.truncate()
+
         last_part_index = len(parts) - 1
-        if self.object.checksum_algorithm:
-            checksum_key = f"Checksum{self.object.checksum_algorithm.upper()}"
+        # TODO: this part is currently not implemented, time permitting
+        # if self.object.checksum_algorithm:
+        #     checksum_key = f"Checksum{self.object.checksum_algorithm.upper()}"
         object_etag = hashlib.md5(usedforsecurity=False)
 
         pos = 0
         for index, part in enumerate(parts):
             part_number = part["PartNumber"]
             part_etag = part["ETag"]
-            # TODO: verify checksum part, maybe from the algo?
-            part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
 
             s3_part = self.parts.get(part_number)
-            # TODO: verify etag format here
             if not s3_part or s3_part.etag != part_etag.strip('"'):
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
+                reset_buffer()
                 # raise InvalidPart()
                 raise
-            # TODO: validate this?
-            if part_checksum and part_checksum != s3_part.checksum_value:
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
-                # raise InvalidPart()
-                raise
+
+            # TODO: this part is currently not implemented, time permitting
+            # part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
+            # if part_checksum and part_checksum != s3_part.checksum_value:
+            #     reset_buffer()
+            #     raise Exception()
+
             if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
+                reset_buffer()
                 # raise EntityTooSmall()
                 raise
 
@@ -448,16 +448,6 @@ class S3Multipart:
             buffer.seek(0, 2)
             self.object.size = buffer.tell()
             buffer.seek(0)
-
-        # free the space before the garbage collection, just to be faster
-        # TODO: clear the parts_buffers in the provider from the StorageBackend
-        # for part in self.parts.values():
-        #     part.value.close()
-
-        # now the full data should be in self.object.value, and the etag set
-        # we can now properly retrieve the S3Object from the S3Multipart, set it as its own key
-        # and delete the multipart
-        # TODO: set the parts list to support `PartNumber` in GetObject !!
 
 
 # TODO: use SynchronizedDefaultDict to prevent updates during iteration?
