@@ -117,6 +117,10 @@ def is_asf_provider():
     return not LEGACY_S3_PROVIDER
 
 
+def is_v3_provider():
+    return True
+
+
 @pytest.fixture(scope="function")
 def patch_s3_skip_signature_validation_false(monkeypatch):
     monkeypatch.setattr(config, "S3_SKIP_SIGNATURE_VALIDATION", False)
@@ -520,8 +524,9 @@ class TestS3:
         paths=[
             "$..HTTPHeaders.connection",
             # TODO content-length and type is wrong, skipping for now
-            "$..HTTPHeaders.content-length",  # 58, but should be 0
+            "$..HTTPHeaders.content-length",  # 58, but should be 0 # TODO!!!
             "$..HTTPHeaders.content-type",  # application/xml but should not be set
+            "$..MaxAttemptsReached",
         ],
     )  # for ASF we currently always set 'close'
     @markers.snapshot.skip_snapshot_verify(
@@ -596,11 +601,13 @@ class TestS3:
         object_key = "key-with-metadata"
         metadata = {"TEST_META_1": "foo", "__meta_2": "bar"}
         aws_client.s3.put_object(Bucket=s3_bucket, Key=object_key, Metadata=metadata, Body="foo")
-        metadata_saved = aws_client.s3.head_object(Bucket=s3_bucket, Key=object_key)["Metadata"]
-        snapshot.match("head-object", metadata_saved)
+        head_object = aws_client.s3.head_object(Bucket=s3_bucket, Key=object_key)
+        snapshot.match("head-object", head_object)
+        assert head_object["ResponseMetadata"]["HTTPHeaders"]["x-amz-meta-test_meta_1"] == "foo"
+        assert head_object["ResponseMetadata"]["HTTPHeaders"]["x-amz-meta-__meta_2"] == "bar"
 
         # note that casing is removed (since headers are case-insensitive)
-        assert metadata_saved == {"test_meta_1": "foo", "__meta_2": "bar"}
+        assert head_object["Metadata"] == {"test_meta_1": "foo", "__meta_2": "bar"}
 
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(
@@ -677,8 +684,10 @@ class TestS3:
     def test_list_objects_versions_with_prefix(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
         objects = [
-            {"Key": "dir/test", "Content": b"content 1"},
-            {"Key": "dir/subdir/test2", "Content": b"content 2"},
+            {"Key": "dir/test", "Content": b"content key1-v1"},
+            {"Key": "dir/test", "Content": b"content key-1v2"},
+            {"Key": "dir/subdir/test2", "Content": b"content key2-v1"},
+            {"Key": "dir/subdir/test2", "Content": b"content key2-v2"},
         ]
         params = [
             {"Prefix": "dir/", "Delimiter": "/", "Id": 1},
@@ -836,12 +845,9 @@ class TestS3:
         snapshot.match("get-object-attrs-v1", response)
 
     @markers.parity.aws_validated
+    @markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])
     @markers.snapshot.skip_snapshot_verify(
-        paths=[
-            "$..ServerSideEncryption",  # missing from the response as it's default in AWS now
-            "$..NextKeyMarker",  # not returned by LocalStack yet
-            "$..NextUploadIdMarker",
-        ]
+        condition=is_asf_provider, paths=["$..NextKeyMarker", "$..NextUploadIdMarker"]
     )
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..VersionId", "$..Error.RequestID"]
@@ -1231,6 +1237,7 @@ class TestS3:
 
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(condition=is_old_provider, paths=["$..AcceptRanges"])
+    @markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])
     def test_s3_copy_metadata_replace(self, s3_create_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
 
@@ -1242,6 +1249,7 @@ class TestS3:
             Body='{"key": "value"}',
             ContentType="application/json",
             Metadata={"key": "value"},
+            ContentLanguage="en-US",
         )
         snapshot.match("put_object", resp)
 
@@ -1254,7 +1262,7 @@ class TestS3:
             CopySource=f"{bucket_name}/{object_key}",
             Key=object_key_copy,
             Metadata={"another-key": "value"},
-            ContentType="application/javascript",
+            ContentType="image/jpg",
             MetadataDirective="REPLACE",
         )
         snapshot.match("copy_object", resp)
@@ -1274,6 +1282,7 @@ class TestS3:
             Key=object_key,
             Body="test",
             Metadata={"key": "value"},
+            ContentLanguage="en-US",
         )
         snapshot.match("put-object", resp)
 
@@ -1286,6 +1295,8 @@ class TestS3:
             CopySource=f"{bucket_name}/{object_key}",
             Key=object_key_copy,
             Metadata={"another-key": "value"},  # this will be ignored
+            ContentLanguage="en-GB",
+            ContentType="image/jpg",
             MetadataDirective="COPY",
         )
         snapshot.match("copy-object", resp)
@@ -3227,9 +3238,7 @@ class TestS3:
             )
 
             with pytest.raises(ClientError) as e:
-                response = aws_client.s3.head_bucket(
-                    Bucket=f"does-not-exist-{short_uid()}-{short_uid()}"
-                )
+                aws_client.s3.head_bucket(Bucket=f"does-not-exist-{short_uid()}-{short_uid()}")
             snapshot.match("head_bucket_not_exist", e.value.response)
         finally:
             aws_client.s3.delete_bucket(Bucket=bucket_1)
@@ -3288,33 +3297,31 @@ class TestS3:
         assert content_vhost == content_path_style
 
     @markers.parity.aws_validated
-    @markers.snapshot.skip_snapshot_verify(paths=["$..Prefix"])
+    # @markers.snapshot.skip_snapshot_verify(paths=["$..Prefix"])
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..ContentLanguage", "$..VersionId"]
     )
-    def test_s3_put_more_than_1000_items(self, s3_create_bucket, snapshot, aws_client):
+    def test_s3_put_more_than_1000_items(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
-        bucket_name = "test" + short_uid()
-        s3_create_bucket(Bucket=bucket_name)
         for i in range(0, 1010, 1):
             body = "test-" + str(i)
             key = "test-key-" + str(i)
-            aws_client.s3.put_object(Bucket=bucket_name, Key=key, Body=body)
+            aws_client.s3.put_object(Bucket=s3_bucket, Key=key, Body=body)
 
         # trying to get the last item of 1010 items added.
-        resp = aws_client.s3.get_object(Bucket=bucket_name, Key="test-key-1009")
+        resp = aws_client.s3.get_object(Bucket=s3_bucket, Key="test-key-1009")
         snapshot.match("get_object-1009", resp)
 
         # trying to get the first item of 1010 items added.
-        resp = aws_client.s3.get_object(Bucket=bucket_name, Key="test-key-0")
+        resp = aws_client.s3.get_object(Bucket=s3_bucket, Key="test-key-0")
         snapshot.match("get_object-0", resp)
 
         # according docs for MaxKeys: the response might contain fewer keys but will never contain more.
         # AWS returns less during testing
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, MaxKeys=1010)
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, MaxKeys=1010)
         assert 1010 >= len(resp["Contents"])
 
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, Delimiter="/")
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, Delimiter="/")
         assert 1000 == len(resp["Contents"])
         # way too much content, remove it from this match
         snapshot.add_transformer(
@@ -3326,7 +3333,7 @@ class TestS3:
         next_marker = resp["NextMarker"]
 
         # Second list
-        resp = aws_client.s3.list_objects(Bucket=bucket_name, Marker=next_marker)
+        resp = aws_client.s3.list_objects(Bucket=s3_bucket, Marker=next_marker)
         snapshot.match("list-objects-next_marker", resp)
         assert 10 == len(resp["Contents"])
 
