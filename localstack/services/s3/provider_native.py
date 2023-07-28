@@ -357,7 +357,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # TODO: returned fields
         # RequestCharged: Optional[RequestCharged]  # TODO
         response = PutObjectOutput(
-            ETag=f'"{s3_object.etag}"',
+            ETag=s3_object.quoted_etag,
         )
         if s3_object.version_id:  # TODO: better way?
             response["VersionId"] = s3_object.version_id
@@ -814,7 +814,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         dest_s3_bucket.objects.set(dest_key, s3_object)
 
         copy_object_result = CopyObjectResult(
-            ETag=f'"{s3_object.etag}"',
+            ETag=s3_object.quoted_etag,
             LastModified=s3_object.last_modified,
         )
         if s3_object.checksum_algorithm:
@@ -896,7 +896,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # TODO: add RestoreStatus if present
             object_data = Object(
                 Key=s3_object.key,
-                ETag=f'"{s3_object.etag}"',
+                ETag=s3_object.quoted_etag,
                 Owner=s3_bucket.owner,  # TODO: verify reality
                 Size=s3_object.size,
                 LastModified=s3_object.last_modified,
@@ -1012,7 +1012,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # TODO: add RestoreStatus if present
             object_data = Object(
                 Key=s3_object.key,
-                ETag=f'"{s3_object.etag}"',
+                ETag=s3_object.quoted_etag,
                 Size=s3_object.size,
                 LastModified=s3_object.last_modified,
                 StorageClass=s3_object.storage_class,
@@ -1132,7 +1132,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # TODO: add RestoreStatus if present
             object_version = ObjectVersion(
                 Key=version.key,
-                ETag=f'"{version.etag}"',
+                ETag=version.quoted_etag,
                 Owner=s3_bucket.owner,  # TODO: verify reality
                 Size=version.size,
                 VersionId=version.version_id or "null",
