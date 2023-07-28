@@ -1294,21 +1294,15 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: CreateMultipartUploadRequest,
-        # acl: ObjectCannedACL = None,
-        # grant_full_control: GrantFullControl = None,
-        # grant_read: GrantRead = None,
-        # grant_read_acp: GrantReadACP = None,
-        # grant_write_acp: GrantWriteACP = None,
-        #
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # ssekms_encryption_context: SSEKMSEncryptionContext = None,
-        #
-        # request_payer: RequestPayer = None,
-        # tagging: TaggingHeader = None,
-        # expected_bucket_owner: AccountId = None,
     ) -> CreateMultipartUploadOutput:
+        # TODO: handle missing parameters:
+        #  acl: ObjectCannedACL = None,
+        #  grant_full_control: GrantFullControl = None,
+        #  grant_read: GrantRead = None,
+        #  grant_read_acp: GrantReadACP = None,
+        #  grant_write_acp: GrantWriteACP = None,
+        #  request_payer: RequestPayer = None,
+        #  tagging: TaggingHeader = None,
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
         if not (s3_bucket := store.buckets.get(bucket_name)):
@@ -1334,10 +1328,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: consolidate ACL into one, and validate it
 
-        # until then, try that
-        # get checksum value from request if present
-
-        # TODO: validate the algo?
+        # TODO: validate the algorithm?
         checksum_algorithm = request.get("ChecksumAlgorithm")
 
         # validate encryption values
@@ -1379,8 +1370,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # TODO: missing response fields we're not currently supporting
         # - AbortDate: lifecycle related,not currently supported, todo
         # - AbortRuleId: lifecycle related, not currently supported, todo
-        # - SSECustomerAlgorithm: usual
-        # - SSECustomerKeyMD5: usual
         # - RequestCharged: todo
         # - ChecksumAlgorithm: not currently supported, todo
 
@@ -1391,14 +1380,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: UploadPartRequest,
-        # content_length: ContentLength = None,
-        # content_md5: ContentMD5 = None,  # TODO?
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # request_payer: RequestPayer = None,
-        # expected_bucket_owner: AccountId = None,
     ) -> UploadPartOutput:
+        # TODO: missing following parameters:
+        #  content_length: ContentLength = None, ->validate?
+        #  content_md5: ContentMD5 = None, -> validate?
+        #  request_payer: RequestPayer = None,
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
         if not (s3_bucket := store.buckets.get(bucket_name)):
@@ -1412,7 +1398,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 UploadId=upload_id,
             )
 
-        # TODO: validate key?? is data model wrong??
+        # TODO: validate key?
         if s3_multipart.object.key != request.get("Key"):
             pass
 
@@ -1459,20 +1445,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         s3_multipart.parts[part_number] = s3_part
 
-        # SSECustomerAlgorithm: Optional[SSECustomerAlgorithm]
-        # SSECustomerKeyMD5: Optional[SSECustomerKeyMD5]
-        # SSEKMSKeyId: Optional[SSEKMSKeyId]
-        # RequestCharged: Optional[RequestCharged]
         response = UploadPartOutput(
-            ETag=f'"{s3_part.etag}"',
+            ETag=s3_part.quoted_etag,
         )
 
-        # TODO: create helper
         add_encryption_to_response(response, s3_object=s3_multipart.object)
 
         if s3_part.checksum_algorithm:
             response[f"Checksum{checksum_algorithm.upper()}"] = s3_part.checksum_value
 
+        # TODO: RequestCharged: Optional[RequestCharged]
         return response
 
     @handler("UploadPartCopy", expand=False)
@@ -1480,21 +1462,13 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: UploadPartCopyRequest,
-        # copy_source_if_match: CopySourceIfMatch = None,
-        # copy_source_if_modified_since: CopySourceIfModifiedSince = None,
-        # copy_source_if_none_match: CopySourceIfNoneMatch = None,
-        # copy_source_if_unmodified_since: CopySourceIfUnmodifiedSince = None,
-        # copy_source_range: CopySourceRange = None,
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # copy_source_sse_customer_algorithm: CopySourceSSECustomerAlgorithm = None,
-        # copy_source_sse_customer_key: CopySourceSSECustomerKey = None,
-        # copy_source_sse_customer_key_md5: CopySourceSSECustomerKeyMD5 = None,
-        # request_payer: RequestPayer = None,
-        # expected_bucket_owner: AccountId = None,
-        # expected_source_bucket_owner: AccountId = None,
     ) -> UploadPartCopyOutput:
+        # TODO: handle following parameters:
+        #  copy_source_if_match: CopySourceIfMatch = None,
+        #  copy_source_if_modified_since: CopySourceIfModifiedSince = None,
+        #  copy_source_if_none_match: CopySourceIfNoneMatch = None,
+        #  copy_source_if_unmodified_since: CopySourceIfUnmodifiedSince = None,
+        #  request_payer: RequestPayer = None,
         dest_bucket = request["Bucket"]
         dest_key = request["Bucket"]
         store = self.get_store(context.account_id, context.region)
@@ -1523,7 +1497,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 UploadId=upload_id,
             )
 
-        # TODO: validate key?? is data model wrong??
+        # TODO: validate key?
         if s3_multipart.object.key != dest_key:
             pass
 
@@ -1533,7 +1507,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # raise InvalidMaxPartNumberArgument(part_number)
 
         source_range = request.get("CopySourceRange")
-        # TODO implement copy source IF
+        # TODO implement copy source IF (done in ASF provider)
         range_data = parse_range_header(source_range, src_s3_object.size)
 
         src_part_fileobj = self._storage_backend.get_key_fileobj(
@@ -1558,13 +1532,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         s3_multipart.parts[part_number] = s3_part
 
-        #     CopyPartResult: Optional[CopyPartResult]
+        # TODO: return those fields (checksum not handled currently in moto for parts)
         # ChecksumCRC32: Optional[ChecksumCRC32]
         # ChecksumCRC32C: Optional[ChecksumCRC32C]
         # ChecksumSHA1: Optional[ChecksumSHA1]
         # ChecksumSHA256: Optional[ChecksumSHA256]
-        #     SSECustomerAlgorithm: Optional[SSECustomerAlgorithm]
-        #     SSECustomerKeyMD5: Optional[SSECustomerKeyMD5]
         #     RequestCharged: Optional[RequestCharged]
 
         result = CopyPartResult(
@@ -1611,7 +1583,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 UploadId=upload_id,
             )
 
-        # TODO: validate key?? is data model wrong??
+        # TODO: validate key?
         if s3_multipart.object.key != key:
             pass
 
@@ -1660,7 +1632,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         response = CompleteMultipartUploadOutput(
             Bucket=bucket,
             Key=key,
-            ETag=f'"{s3_object.etag}"',
+            ETag=s3_object.quoted_etag,
             Location=f"{get_full_default_bucket_location(bucket)}{bucket}",
         )
 
@@ -1749,7 +1721,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # TODO: implement locking for iteration
         parts = [
             Part(
-                ETag=f'"{part.etag}"',
+                ETag=part.quoted_etag,
                 LastModified=part.last_modified,
                 PartNumber=part_number,
                 Size=part.size,
@@ -1785,8 +1757,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         s3_multiparts = s3_bucket.multiparts
         # https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html
-        # TODO implement Prefix/Delimiter/CommonPrefixes/EncodingType
-        # should be common from ListObjects?
+        # TODO implement Prefix/Delimiter/CommonPrefixes/EncodingType and truncating results
+        # should be common from ListObjects?ListVersions
 
         #     NextKeyMarker: Optional[NextKeyMarker] ?
         #     NextUploadIdMarker: Optional[NextUploadIdMarker] ?
