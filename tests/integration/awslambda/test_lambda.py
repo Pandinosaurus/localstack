@@ -987,7 +987,6 @@ class TestLambdaFeatures:
         snapshot.match("invoke-result", result)
 
         assert 202 == result["StatusCode"]
-        time.sleep(10)
 
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..LogResult", "$..ExecutedVersion"]
