@@ -3,7 +3,10 @@ from operator import itemgetter
 import pytest
 from botocore.exceptions import ClientError
 
+from localstack import config
 
+
+@pytest.mark.skipif(condition=not config.NATIVE_S3_PROVIDER)
 class TestS3BucketCRUD:
     def test_create_bucket(self, s3_create_bucket):
         pass
@@ -59,6 +62,7 @@ class TestS3BucketCRUD:
         snapshot.match("success-delete-bucket", delete_bucket)
 
 
+@pytest.mark.skipif(condition=not config.NATIVE_S3_PROVIDER)
 class TestS3ObjectCRUD:
     def test_delete_object(self, s3_bucket, aws_client, snapshot):
         key_name = "test-delete"

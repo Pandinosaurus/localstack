@@ -83,7 +83,7 @@ from localstack.services.s3.exceptions import (
     InvalidRequest,
     MalformedXML,
 )
-from localstack.services.s3.models_v2 import (
+from localstack.services.s3.models_native import (
     PartialStream,
     S3Bucket,
     S3DeleteMarker,
@@ -133,8 +133,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         bucket_name = request["Bucket"]
 
         if not is_bucket_name_valid(bucket_name):
-            # TODO: find error message
-            raise InvalidBucketName(BucketName=bucket_name)
+            raise InvalidBucketName("The specified bucket is not valid.", BucketName=bucket_name)
         if create_bucket_configuration := request.get("CreateBucketConfiguration"):
             if not (bucket_region := create_bucket_configuration.get("LocationConstraint")):
                 raise MalformedXML()
@@ -252,25 +251,20 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: PutObjectRequest,
-        # acl: ObjectCannedACL = None,
-        # grant_full_control: GrantFullControl = None,
-        # grant_read: GrantRead = None,
-        # grant_read_acp: GrantReadACP = None,
-        # grant_write_acp: GrantWriteACP = None,
-        #
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # ssekms_encryption_context: SSEKMSEncryptionContext = None,
-        #
-        # request_payer: RequestPayer = None,
-        # tagging: TaggingHeader = None,
-        # object_lock_mode: ObjectLockMode = None,
-        # object_lock_retain_until_date: ObjectLockRetainUntilDate = None,
-        # object_lock_legal_hold_status: ObjectLockLegalHoldStatus = None,
-        # expected_bucket_owner: AccountId = None,
     ) -> PutObjectOutput:
         # TODO: validate order of validation
+        # TODO: still need to handle following parameters:
+        #  acl: ObjectCannedACL = None,
+        #  grant_full_control: GrantFullControl = None,
+        #  grant_read: GrantRead = None,
+        #  grant_read_acp: GrantReadACP = None,
+        #  grant_write_acp: GrantWriteACP = None,
+        #  -
+        #  request_payer: RequestPayer = None,
+        #  tagging: TaggingHeader = None,
+        #  object_lock_mode: ObjectLockMode = None,
+        #  object_lock_retain_until_date: ObjectLockRetainUntilDate = None,
+        #  object_lock_legal_hold_status: ObjectLockLegalHoldStatus = None,
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
         if not (s3_bucket := store.buckets.get(bucket_name)):
@@ -292,10 +286,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not system_metadata.get("ContentType"):
             system_metadata["ContentType"] = "binary/octet-stream"
 
-        # TODO: get all default from bucket, maybe extract logic
-
-        # TODO: consolidate ACL into one, and validate it
-
+        # TODO: get all default from bucket once it is implemented
         # validate encryption values
 
         body = request.get("Body")
@@ -306,11 +297,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             decoded_content_length = int(headers.get("x-amz-decoded-content-length", 0))
             body = AwsChunkedDecoder(body, decoded_content_length)
 
-            # TODO: AWS CHUNK DECODER HERE
+        # TODO check if key already exist, and if it is locked? so we don't override it
 
-        # TODO check if key already exist, and if it is locked?
-
-        # TODO: check length VERSION_ID
         version_id = generate_version_id(s3_bucket.versioning_status)
 
         fileobj = self._storage_backend.get_key_fileobj(
@@ -362,19 +350,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         ):
             existing_s3_object.is_current = False
 
-        # TODO: update versioning to include None, Enabled, Suspended
-        # if None, version_id = None, Suspend = "null" Enabled = "random"
         s3_bucket.objects.set(key, s3_object)
 
         # TODO: tags: do we have tagging service or do we manually handle? see utils TaggingService
-        #  add to store
 
-        # TODO: fields
-        # Expiration: Optional[Expiration] TODO
-
-        # SSECustomerAlgorithm: Optional[SSECustomerAlgorithm] ?
-        # SSECustomerKeyMD5: Optional[SSECustomerKeyMD5] ?
-        # SSEKMSEncryptionContext: Optional[SSEKMSEncryptionContext] ?
+        # TODO: returned fields
         # RequestCharged: Optional[RequestCharged]  # TODO
         response = PutObjectOutput(
             ETag=f'"{s3_object.etag}"',
@@ -397,35 +377,21 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: GetObjectRequest,
-        # if_match: IfMatch = None,
-        # if_modified_since: IfModifiedSince = None,
-        # if_none_match: IfNoneMatch = None,
-        # if_unmodified_since: IfUnmodifiedSince = None,
-        # response_cache_control: ResponseCacheControl = None,  # TODO: HANDLE, already in provider
-        # response_content_disposition: ResponseContentDisposition = None,
-        # response_content_encoding: ResponseContentEncoding = None,
-        # response_content_language: ResponseContentLanguage = None,
-        # response_content_type: ResponseContentType = None,
-        # response_expires: ResponseExpires = None,
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # request_payer: RequestPayer = None,
-        # part_number: PartNumber = None,
-        # expected_bucket_owner: AccountId = None,
     ) -> GetObjectOutput:
-        # TODO: might add x-robot for system metadata??
-        #     Expiration: Optional[Expiration]
-        #     Restore: Optional[Restore]
-
-        #     SSECustomerAlgorithm: Optional[SSECustomerAlgorithm]
-        #     SSECustomerKeyMD5: Optional[SSECustomerKeyMD5]
-        #     RequestCharged: Optional[RequestCharged]
-        #     ReplicationStatus: Optional[ReplicationStatus]
-        #     TagCount: Optional[TagCount]
-        #     ObjectLockMode: Optional[ObjectLockMode]
-        #     ObjectLockRetainUntilDate: Optional[ObjectLockRetainUntilDate]
-        #     ObjectLockLegalHoldStatus: Optional[ObjectLockLegalHoldStatus]
+        # TODO: missing handling parameters:
+        #  if_match: IfMatch = None,
+        #  if_modified_since: IfModifiedSince = None,
+        #  if_none_match: IfNoneMatch = None,
+        #  if_unmodified_since: IfUnmodifiedSince = None,
+        #  response_cache_control: ResponseCacheControl = None,
+        #  response_content_disposition: ResponseContentDisposition = None,
+        #  response_content_encoding: ResponseContentEncoding = None,
+        #  response_content_language: ResponseContentLanguage = None,
+        #  response_content_type: ResponseContentType = None,
+        #  response_expires: ResponseExpires = None,
+        #  request_payer: RequestPayer = None,
+        #  part_number: PartNumber = None,
+        #  expected_bucket_owner: AccountId = None,
 
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
@@ -434,7 +400,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket_name)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket_name)
 
-        # TODO implement PartNumber once multipart is done
+        # TODO implement PartNumber once multipart is done (being able to select only a Part)
 
         s3_object = s3_bucket.get_object(
             key=object_key,
@@ -442,8 +408,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             http_method="GET",
         )
 
-        # TODO implement special logic in serializer for S3, no specs for `x-amz-meta` headers, pass them as is
-        # or maybe it's Metadata field? check and implement sysem/user metadata separation
         response = GetObjectOutput(
             AcceptRanges="bytes",
             **s3_object.get_system_metadata_fields(),
@@ -477,12 +441,23 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 max_length=range_data.content_length,
                 begin=range_data.begin,
             )
-            # TODO: should we set content-length? feels like it would allow chunk encoding but?? well parity says we should for now
             response["ContentRange"] = range_data.content_range
-            response["ContentLength"] = range_data.content_length
+            response[
+                "ContentLength"
+            ] = range_data.content_length  # TODO: should we set it for chunked encoding?
             response["StatusCode"] = 206
         else:
             response["Body"] = get_body_iterator(stream=fileobj, max_length=s3_object.size)
+
+        # TODO: missing returned fields
+        #     Expiration: Optional[Expiration]
+        #     Restore: Optional[Restore]
+        #     RequestCharged: Optional[RequestCharged]
+        #     ReplicationStatus: Optional[ReplicationStatus]
+        #     TagCount: Optional[TagCount]
+        #     ObjectLockMode: Optional[ObjectLockMode]
+        #     ObjectLockRetainUntilDate: Optional[ObjectLockRetainUntilDate]
+        #     ObjectLockLegalHoldStatus: Optional[ObjectLockLegalHoldStatus]
 
         return response
 
@@ -491,16 +466,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: HeadObjectRequest,
-        # if_match: IfMatch = None,
-        # if_modified_since: IfModifiedSince = None,
-        # if_none_match: IfNoneMatch = None,
-        # if_unmodified_since: IfUnmodifiedSince = None,
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
-        # request_payer: RequestPayer = None,
-        # part_number: PartNumber = None,
-        # expected_bucket_owner: AccountId = None,
     ) -> HeadObjectOutput:
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
@@ -509,25 +474,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket_name)
 
         # TODO implement PartNumber, don't know about part number + version id?
+        #  if_match: IfMatch = None,
+        #  if_modified_since: IfModifiedSince = None,
+        #  if_none_match: IfNoneMatch = None,
+        #  if_unmodified_since: IfUnmodifiedSince = None,
+
         s3_object = s3_bucket.get_object(
             key=object_key,
             version_id=request.get("VersionId"),
             http_method="HEAD",
         )
-
-        # DeleteMarker: Optional[DeleteMarker]
-        # Expiration: Optional[Expiration]
-        # Restore: Optional[Restore]
-        # ArchiveStatus: Optional[ArchiveStatus]
-        # SSECustomerAlgorithm: Optional[SSECustomerAlgorithm]
-        # SSECustomerKeyMD5: Optional[SSECustomerKeyMD5]
-        # SSEKMSKeyId: Optional[SSEKMSKeyId]
-
-        # RequestCharged: Optional[RequestCharged]
-        # ReplicationStatus: Optional[ReplicationStatus]
-        # ObjectLockMode: Optional[ObjectLockMode]
-        # ObjectLockRetainUntilDate: Optional[ObjectLockRetainUntilDate]
-        # ObjectLockLegalHoldStatus: Optional[ObjectLockLegalHoldStatus]
 
         response = HeadObjectOutput(
             AcceptRanges="bytes",
@@ -547,7 +503,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             range_data = parse_range_header(range_header, s3_object.size)
             response["ContentLength"] = range_data.content_length
 
-        # TODO
         if s3_object.parts:
             response["PartsCount"] = len(s3_object.parts)
 
@@ -557,13 +512,22 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if s3_object.website_redirect_location:
             response["WebsiteRedirectLocation"] = s3_object.website_redirect_location
 
+        # TODO: missing return fields:
+        # Expiration: Optional[Expiration]
+        # Restore: Optional[Restore]
+        # ArchiveStatus: Optional[ArchiveStatus]
+
+        # RequestCharged: Optional[RequestCharged]
+        # ReplicationStatus: Optional[ReplicationStatus]
+        # ObjectLockMode: Optional[ObjectLockMode]
+        # ObjectLockRetainUntilDate: Optional[ObjectLockRetainUntilDate]
+        # ObjectLockLegalHoldStatus: Optional[ObjectLockLegalHoldStatus]
+
         return response
 
-    # @handler("DeleteObject", expand=False)
     def delete_object(
         self,
         context: RequestContext,
-        # request: DeleteObjectRequest,
         bucket: BucketName,
         key: ObjectKey,
         mfa: MFA = None,
@@ -595,9 +559,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             delete_marker_id = generate_version_id(s3_bucket.versioning_status)
             delete_marker = S3DeleteMarker(key=key, version_id=delete_marker_id)
             # TODO: verify with Suspended bucket? does it override last version or still append?? big question
-            # I think it puts a delete marker with a `null` VersionId, which deletes the object under
-            # append the DeleteMaker to the objects stack
-            # if the key does not exist already, AWS does not care and just append a DeleteMarker anyway
+            #  I think it puts a delete marker with a `null` VersionId, which deletes the object under
             s3_bucket.objects.set(key, delete_marker)
             return DeleteObjectOutput(VersionId=delete_marker.version_id, DeleteMarker=True)
 
@@ -612,13 +574,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             )
 
         response = DeleteObjectOutput(VersionId=found_object.version_id)
-        # object versions is directly mutable, so we can directly remove the Object
-        # to avoid concurrency issue, we will remove and not pop from the index
-        # TODO: implementing locking, locked dict from persistence?
-
-        # # if the list is now empty, pop the key entry
-        # if not object_versions:
-        #     s3_bucket.objects.pop(key)
 
         if isinstance(found_object, S3DeleteMarker):
             response["DeleteMarker"] = True
@@ -686,10 +641,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             if not version_id:
                 delete_marker_id = generate_version_id(s3_bucket.versioning_status)
                 delete_marker = S3DeleteMarker(key=object_key, version_id=delete_marker_id)
-                # TODO: verify with Suspended bucket? does it override last version or still append?? big question
-                # I think it puts a delete marker with a `null` VersionId, which deletes the object under
-                # append the DeleteMaker to the objects stack
-                # if the key does not exist already, AWS does not care and just append a DeleteMarker anyway
                 s3_bucket.objects.set(object_key, delete_marker)
                 if not quiet:
                     deleted.append(
@@ -740,41 +691,29 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self,
         context: RequestContext,
         request: CopyObjectRequest,
+    ) -> CopyObjectOutput:
+        # TODO: handle those parameters next:
         # acl: ObjectCannedACL = None,
+        # grant_full_control: GrantFullControl = None,
+        # grant_read: GrantRead = None,
+        # grant_read_acp: GrantReadACP = None,
+        # grant_write_acp: GrantWriteACP = None,
         #
         # copy_source_if_match: CopySourceIfMatch = None,
         # copy_source_if_modified_since: CopySourceIfModifiedSince = None,
         # copy_source_if_none_match: CopySourceIfNoneMatch = None,
         # copy_source_if_unmodified_since: CopySourceIfUnmodifiedSince = None,
         #
-        # expires: Expires = None,  # TODO: check, could it be part of metadata?
-        #
-        # grant_full_control: GrantFullControl = None,
-        # grant_read: GrantRead = None,
-        # grant_read_acp: GrantReadACP = None,
-        # grant_write_acp: GrantWriteACP = None,
-        #
         # tagging_directive: TaggingDirective = None,
         # server_side_encryption: ServerSideEncryption = None,
-        #
-        # sse_customer_algorithm: SSECustomerAlgorithm = None,
-        # sse_customer_key: SSECustomerKey = None,
-        # sse_customer_key_md5: SSECustomerKeyMD5 = None,
         # ssekms_key_id: SSEKMSKeyId = None,
-        # ssekms_encryption_context: SSEKMSEncryptionContext = None,
         # bucket_key_enabled: BucketKeyEnabled = None,
-        # copy_source_sse_customer_algorithm: CopySourceSSECustomerAlgorithm = None,
-        # copy_source_sse_customer_key: CopySourceSSECustomerKey = None,
-        # copy_source_sse_customer_key_md5: CopySourceSSECustomerKeyMD5 = None,
         #
         # request_payer: RequestPayer = None,
         # tagging: TaggingHeader = None,
         # object_lock_mode: ObjectLockMode = None,
         # object_lock_retain_until_date: ObjectLockRetainUntilDate = None,
         # object_lock_legal_hold_status: ObjectLockLegalHoldStatus = None,
-        # expected_bucket_owner: AccountId = None,
-        # expected_source_bucket_owner: AccountId = None,
-    ) -> CopyObjectOutput:
         dest_bucket = request["Bucket"]
         dest_key = request["Key"]
         store = self.get_store(context.account_id, context.region)
@@ -795,7 +734,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: validate StorageClass for ARCHIVES one
         if src_s3_object.storage_class in ARCHIVES_STORAGE_CLASSES:
-            pass
+            raise
 
         # TODO validate order of validation
         storage_class = request.get("StorageClass")
@@ -861,7 +800,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
             website_redirect_location=website_redirect_location,
-            expiration=None,  # TODO, from lifecycle, or should it be updated with config?
+            expiration=None,  # TODO, from lifecycle
             acl=None,
         )
         # Object copied from Glacier object should not have expiry
@@ -873,13 +812,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             existing_s3_object.is_current = False
 
         dest_s3_bucket.objects.set(dest_key, s3_object)
-
-        #     CopyObjectResult: Optional[CopyObjectResult]
-        #     SSECustomerAlgorithm: Optional[SSECustomerAlgorithm] ?
-        #     SSECustomerKeyMD5: Optional[SSECustomerKeyMD5] ?
-        #     SSEKMSKeyId: Optional[SSEKMSKeyId] ?
-        #     SSEKMSEncryptionContext: Optional[SSEKMSEncryptionContext] ?
-        #     RequestCharged: Optional[RequestCharged] # TODO
 
         copy_object_result = CopyObjectResult(
             ETag=f'"{s3_object.etag}"',
@@ -894,7 +826,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             CopyObjectResult=copy_object_result,
         )
 
-        if s3_object.version_id:  # TODO: better way?
+        if s3_object.version_id:
             response["VersionId"] = s3_object.version_id
 
         if s3_object.expiration:
@@ -904,6 +836,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if src_version_id:
             response["CopySourceVersionId"] = src_version_id
+
+        # RequestCharged: Optional[RequestCharged] # TODO
 
         return response
 
@@ -924,7 +858,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
-        # TODO: encode key in URL
+        # TODO: URL encode keys (is it done already in serializer?)
         common_prefixes = set()
         count = 0
         is_truncated = False
@@ -1024,7 +958,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if continuation_token and continuation_token == "":
             raise InvalidArgument("The continuation token provided is incorrect")
 
-        # TODO: encode key in URL
+        # TODO: URL encode keys (is it done already in serializer?)
         common_prefixes = set()
         count = 0
         is_truncated = False
@@ -1136,7 +1070,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
-        # TODO: encode key in URL
+        # TODO: URL encode keys (is it done already in serializer?)
         common_prefixes = set()
         count = 0
         is_truncated = False
@@ -1253,8 +1187,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if not (s3_bucket := store.buckets.get(bucket_name)):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket_name)
 
-        # TODO implement PartNumber once multipart is done
-
         s3_object = s3_bucket.get_object(
             key=object_key,
             version_id=request.get("VersionId"),
@@ -1263,7 +1195,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         object_attrs = request.get("ObjectAttributes", [])
         response = GetObjectAttributesOutput()
-        # TODO: see Checksum field
         if "ETag" in object_attrs:
             response["ETag"] = s3_object.etag
         if "StorageClass" in object_attrs:
@@ -1277,10 +1208,10 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         response["LastModified"] = s3_object.last_modified
 
-        # TODO enable more from this
         if s3_bucket.versioning_status:
             response["VersionId"] = s3_object.version_id
 
+        # TODO implement PartNumber test once multipart is done
         if s3_object.parts:
             response["ObjectParts"] = GetObjectAttributesParts(TotalPartsCount=len(s3_object.parts))
 
@@ -1330,7 +1261,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
 
 # TODO: remove from here, find its spot??
-# TODO: implement Abstract stream class with .lock attributes
+# TODO: implement Abstract stream class with .lock attributes, so that we don't need to Union all different
+#  StorageBackend file objects
 def get_body_iterator(
     stream: IO[bytes] | LockedSpooledTemporaryFile, max_length: int, begin: int = 0
 ) -> Iterator[bytes]:
@@ -1391,7 +1323,7 @@ def readinto_fileobj(
 def generate_version_id(bucket_versioning_status: str) -> str | None:
     if not bucket_versioning_status:
         return None
-
+    # TODO: check VersionID format, could it be base64 urlsafe encoded?
     return token_urlsafe(16) if bucket_versioning_status.lower() == "enabled" else "null"
 
 

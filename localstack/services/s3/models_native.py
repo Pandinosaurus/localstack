@@ -1,15 +1,13 @@
-import hashlib
 import logging
 from collections import defaultdict
 from datetime import datetime
 from io import RawIOBase
-from secrets import token_urlsafe
-from typing import IO, Literal, Optional, Union
+from typing import IO, Any, Literal, Optional, Union
 
 from werkzeug.datastructures.headers import Headers
 
 from localstack import config
-from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRules,; Body,
+from localstack.aws.api.s3 import (
     AccountId,
     AnalyticsConfiguration,
     AnalyticsId,
@@ -17,9 +15,9 @@ from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRul
     BucketName,
     BucketRegion,
     ChecksumAlgorithm,
-    CompletedPartList,
     CORSConfiguration,
     ETag,
+    Expiration,
     IntelligentTieringConfiguration,
     IntelligentTieringId,
     InvalidArgument,
@@ -39,7 +37,6 @@ from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRul
     ObjectStorageClass,
     ObjectVersionId,
     Owner,
-    PartNumber,
     Payer,
     Policy,
     PublicAccessBlockConfiguration,
@@ -53,9 +50,13 @@ from localstack.aws.api.s3 import (  # BucketCannedACL,; ServerSideEncryptionRul
     WebsiteConfiguration,
     WebsiteRedirectLocation,
 )
-from localstack.services.s3.constants import S3_CHUNK_SIZE, S3_UPLOAD_PART_MIN_SIZE
 from localstack.services.s3.storage import LockedSpooledTemporaryFile
-from localstack.services.s3.utils import ParsedRange, get_owner_for_account_id
+from localstack.services.s3.utils import (
+    ParsedRange,
+    get_owner_for_account_id,
+    iso_8601_datetime_without_milliseconds_s3,
+    rfc_1123_datetime,
+)
 from localstack.services.stores import (
     AccountRegionBundle,
     BaseStore,
@@ -66,36 +67,16 @@ from localstack.services.stores import (
 # TODO: beware of timestamp data, we need the snapshot to be more precise for S3, with the different types
 # moto had a lot of issue with it? not sure about our parser/serializer
 
-# for persistence, append the version id to the key name using a special symbol?? like __version_id__={version_id}
-
 LOG = logging.getLogger(__name__)
 
 
-# TODO move to utils?
-def iso_8601_datetime_without_milliseconds_s3(
-    value: datetime,
-) -> Optional[str]:
-    return value.strftime("%Y-%m-%dT%H:%M:%S.000Z") if value else None
-
-
-RFC1123 = "%a, %d %b %Y %H:%M:%S GMT"
-
-
-def rfc_1123_datetime(src: datetime) -> str:
-    return src.strftime(RFC1123)
-
-
-def str_to_rfc_1123_datetime(value: str) -> datetime:
-    return datetime.strptime(value, RFC1123)
-
-
-# TODO: we will need a versioned key store as well, let's check what we can get better
+# note: not really a need to use a dataclass here, as it has a lot of fields, but only a few are set at creation
 class S3Bucket:
     name: BucketName
     bucket_account_id: AccountId
     bucket_region: BucketRegion
     creation_date: datetime
-    multiparts: dict[MultipartUploadId, "S3Multipart"]  # TODO: is there a key thing here?
+    multiparts: dict[MultipartUploadId, Any]  # TODO
     objects: Union["KeyStore", "VersionedKeyStore"]
     versioning_status: Literal[None, "Enabled", "Disabled"]
     lifecycle_rules: LifecycleRules
@@ -120,7 +101,6 @@ class S3Bucket:
     owner: Owner
 
     # set all buckets parameters here
-    # first one in moto, then one in our provider added (cors, lifecycle and such)
     def __init__(
         self,
         name: BucketName,
@@ -134,14 +114,11 @@ class S3Bucket:
         self.bucket_account_id = account_id
         self.bucket_region = bucket_region
         self.objects = KeyStore()
-        # self.acl
         self.object_ownership = object_ownership
         self.object_lock_enabled = object_lock_enabled_for_bucket
         self.encryption_rule = None  # TODO
         self.creation_date = datetime.utcnow()
         self.multiparts = {}
-        # we set the versioning status to None instead of False to be able to differentiate between a bucket which
-        # was enabled at some point and one fresh bucket
         self.versioning_status = None
 
         # see https://docs.aws.amazon.com/AmazonS3/latest/API/API_Owner.html
@@ -212,20 +189,21 @@ class S3Bucket:
         return s3_object
 
 
+# note: might be migrated to dataclass once the full API is set
 class S3Object:
     key: ObjectKey
     version_id: Optional[ObjectVersionId]
     size: Size
     etag: ETag
-    user_metadata: Metadata  # TODO: check this?
-    system_metadata: Metadata  # TODO: check this?
+    user_metadata: Metadata
+    system_metadata: Metadata
     last_modified: datetime
     expires: Optional[datetime]
-    expiration: Optional[datetime]
+    expiration: Optional[Expiration]  # come from lifecycle
     storage_class: StorageClass | ObjectStorageClass
-    encryption: Optional[ServerSideEncryption]
-    kms_key_id: Optional[SSEKMSKeyId]
-    bucket_key_enabled: Optional[bool]
+    encryption: Optional[ServerSideEncryption]  # inherit bucket
+    kms_key_id: Optional[SSEKMSKeyId]  # inherit bucket
+    bucket_key_enabled: Optional[bool]  # inherit bucket
     checksum_algorithm: ChecksumAlgorithm
     checksum_value: str
     lock_mode: Optional[ObjectLockMode]
@@ -247,14 +225,14 @@ class S3Object:
         system_metadata: Optional[Metadata] = None,
         storage_class: StorageClass = StorageClass.STANDARD,
         expires: Optional[datetime] = None,
-        expiration: Optional[datetime] = None,  # come from lifecycle
+        expiration: Optional[Expiration] = None,
         checksum_algorithm: Optional[ChecksumAlgorithm] = None,
         checksum_value: Optional[str] = None,
-        encryption: Optional[ServerSideEncryption] = None,  # inherit bucket
-        kms_key_id: Optional[SSEKMSKeyId] = None,  # inherit bucket
-        bucket_key_enabled: bool = False,  # inherit bucket
-        lock_mode: Optional[ObjectLockMode] = None,  # inherit bucket
-        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,  # inherit bucket
+        encryption: Optional[ServerSideEncryption] = None,
+        kms_key_id: Optional[SSEKMSKeyId] = None,
+        bucket_key_enabled: bool = False,
+        lock_mode: Optional[ObjectLockMode] = None,
+        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,
         lock_until: Optional[datetime] = None,
         website_redirect_location: Optional[WebsiteRedirectLocation] = None,
         acl: Optional[str] = None,  # TODO
@@ -270,7 +248,7 @@ class S3Object:
         self.checksum_algorithm = checksum_algorithm
         self.checksum_value = checksum_value
         self.encryption = encryption
-        # TODO: validate the format, always store the ARN even if just the ID
+        # TODO: validate the format for kms_key_id, always store the ARN even if just the ID
         self.kms_key_id = kms_key_id
         self.bucket_key_enabled = bucket_key_enabled
         self.lock_mode = lock_mode
@@ -288,7 +266,7 @@ class S3Object:
         headers = Headers()
         headers["LastModified"] = self.last_modified_rfc1123
         headers["ContentLength"] = str(self.size)
-        headers["ETag"] = f'"{self.etag}"'
+        headers["ETag"] = self.quoted_etag
         if self.expires:
             headers["Expires"] = self.expires_rfc1123
 
@@ -299,10 +277,12 @@ class S3Object:
 
     @property
     def last_modified_iso8601(self) -> str:
+        # TODO: verify if we need them with proper snapshot testing, for now it's copied from moto
         return iso_8601_datetime_without_milliseconds_s3(self.last_modified)  # type: ignore
 
     @property
     def last_modified_rfc1123(self) -> str:
+        # TODO: verify if we need them with proper snapshot testing, for now it's copied from moto
         # Different datetime formats depending on how the key is obtained
         # https://github.com/boto/boto/issues/466
         return rfc_1123_datetime(self.last_modified)
@@ -312,7 +292,7 @@ class S3Object:
         return rfc_1123_datetime(self.expires)
 
     @property
-    def etag_header(self) -> str:
+    def quoted_etag(self) -> str:
         return f'"{self.etag}"'
 
 
@@ -329,155 +309,13 @@ class S3DeleteMarker:
         self.is_current = True
 
 
-class S3Part:
-    part_number: PartNumber
-    etag: ETag
-    last_modified: datetime
-    size: int
-    checksum_algorithm: Optional[ChecksumAlgorithm]
-    checksum_value: Optional[str]
-
-    def __init__(
-        self,
-        part_number: PartNumber,
-        size: int,
-        etag: ETag,
-        checksum_algorithm: Optional[ChecksumAlgorithm] = None,
-        checksum_value: Optional[str] = None,
-    ):
-        self.last_modified = datetime.utcnow()
-        self.part_number = part_number
-        self.size = size
-        self.etag = etag
-        self.checksum_algorithm = checksum_algorithm
-        self.checksum_value = checksum_value
-
-    @property
-    def etag_header(self) -> str:
-        return f'"{self.etag}"'
-
-
-class S3Multipart:
-    parts: dict[PartNumber, S3Part]
-    object: S3Object
-    upload_id: MultipartUploadId
-    checksum_value: Optional[str]
-    initiated: datetime
-
-    def __init__(
-        self,
-        key: ObjectKey,
-        storage_class: StorageClass | ObjectStorageClass = StorageClass.STANDARD,
-        expires: Optional[datetime] = None,
-        expiration: Optional[datetime] = None,  # come from lifecycle
-        checksum_algorithm: Optional[ChecksumAlgorithm] = None,
-        encryption: Optional[ServerSideEncryption] = None,  # inherit bucket
-        kms_key_id: Optional[SSEKMSKeyId] = None,  # inherit bucket
-        bucket_key_enabled: bool = False,  # inherit bucket
-        lock_mode: Optional[ObjectLockMode] = None,  # inherit bucket
-        lock_legal_status: Optional[ObjectLockLegalHoldStatus] = None,  # inherit bucket
-        lock_until: Optional[datetime] = None,
-        website_redirect_location: Optional[WebsiteRedirectLocation] = None,
-        acl: Optional[str] = None,  # TODO
-        user_metadata: Optional[Metadata] = None,
-        system_metadata: Optional[Metadata] = None,
-        initiator: Optional[Owner] = None,
-    ):
-        self.id = token_urlsafe(10)  # TODO
-        self.initiated = datetime.utcnow()
-        self.parts = {}
-        self.initiator = initiator
-        self.checksum_value = None
-        self.object = S3Object(
-            key=key,
-            user_metadata=user_metadata,
-            system_metadata=system_metadata,
-            storage_class=storage_class or StorageClass.STANDARD,
-            expires=expires,
-            expiration=expiration,
-            checksum_algorithm=checksum_algorithm,
-            encryption=encryption,
-            kms_key_id=kms_key_id,
-            bucket_key_enabled=bucket_key_enabled,
-            lock_mode=lock_mode,
-            lock_legal_status=lock_legal_status,
-            lock_until=lock_until,
-            website_redirect_location=website_redirect_location,
-            acl=acl,
-        )
-
-    # TODO: get the part list from the storage engine as well?
-    def complete_multipart(
-        self,
-        parts: CompletedPartList,
-        buffer: LockedSpooledTemporaryFile,
-        parts_buffers: list[LockedSpooledTemporaryFile],
-    ):
-        last_part_index = len(parts) - 1
-        if self.object.checksum_algorithm:
-            checksum_key = f"Checksum{self.object.checksum_algorithm.upper()}"
-        object_etag = hashlib.md5(usedforsecurity=False)
-
-        pos = 0
-        for index, part in enumerate(parts):
-            part_number = part["PartNumber"]
-            part_etag = part["ETag"]
-            # TODO: verify checksum part, maybe from the algo?
-            part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
-
-            s3_part = self.parts.get(part_number)
-            # TODO: verify etag format here
-            if not s3_part or s3_part.etag != part_etag.strip('"'):
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
-                # raise InvalidPart()
-                raise
-            # TODO: validate this?
-            if part_checksum and part_checksum != s3_part.checksum_value:
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
-                # raise InvalidPart()
-                raise
-            if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
-                with buffer.lock:
-                    buffer.seek(0)
-                    buffer.truncate()
-                # raise EntityTooSmall()
-                raise
-
-            stream_value = parts_buffers[index]
-
-            with stream_value.lock, buffer.lock:
-                while data := stream_value.read(S3_CHUNK_SIZE):
-                    buffer.write(data)
-                    pos += len(data)
-
-            object_etag.update(bytes.fromhex(s3_part.etag))
-            self.object.parts.append((pos, s3_part.size))
-
-        multipart_etag = f"{object_etag.hexdigest()}-{len(parts)}"
-        self.object.etag = multipart_etag
-        with buffer.lock:
-            buffer.seek(0, 2)
-            self.object.size = buffer.tell()
-            buffer.seek(0)
-
-        # free the space before the garbage collection, just to be faster
-        # TODO: clear the parts_buffers in the provider from the StorageBackend
-        # for part in self.parts.values():
-        #     part.value.close()
-
-        # now the full data should be in self.object.value, and the etag set
-        # we can now properly retrieve the S3Object from the S3Multipart, set it as its own key
-        # and delete the multipart
-        # TODO: set the parts list to support `PartNumber` in GetObject !!
-
-
-# TODO: use LockDict to prevent access during iteration? Copy works well I think, might be very slow?
-# TODO: create base class?
+# TODO: use SynchronizedDefaultDict to prevent updates during iteration?
 class KeyStore:
+    """
+    Object representing an S3 Un-versioned Bucket's Key Store. An object is mapped by a key, and you can simply
+    retrieve the object from that key.
+    """
+
     def __init__(self):
         self._store = {}
 
@@ -490,29 +328,49 @@ class KeyStore:
     def pop(self, object_key: ObjectKey, default=None) -> S3Object | None:
         return self._store.pop(object_key, default)
 
-    def is_empty(self) -> bool:
-        return not self._store
-
     def values(self, *_, **__) -> list[S3Object | S3DeleteMarker]:
         return [value for value in self._store.values()]
 
+    def is_empty(self) -> bool:
+        return not self._store
+
 
 class VersionedKeyStore:
+    """
+    Object representing an S3 Versioned Bucket's Key Store. An object is mapped by a key, and adding an object to the
+    same key will create a new version of it. When deleting the object, a S3DeleteMarker is created and put on top
+    of the version stack, to signal the object has been "deleted".
+    This object allows easy retrieval and saving of new object versions.
+    See: https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html
+    """
+
     def __init__(self):
         self._store = defaultdict(dict)
 
     def get(
         self, object_key: ObjectKey, version_id: ObjectVersionId = None
     ) -> S3Object | S3DeleteMarker | None:
+        """
+        :param object_key: the key of the Object we need to retrieve
+        :param version_id: Optional, if not specified, return the current version (last one inserted)
+        :return: an S3Object or S3DeleteMarker
+        """
         if not version_id and (versions := self._store.get(object_key)):
             for version_id in reversed(versions):
-                # Get the last set version for that key
-                # TODO: test performance, could be cached if needed
                 return versions.get(version_id)
 
         return self._store.get(object_key, {}).get(version_id)
 
     def set(self, object_key: ObjectKey, s3_object: S3Object | S3DeleteMarker):
+        """
+        Set an S3 object, using its already set VersionId.
+        If the bucket versioning is `Enabled`, then we're just inserting a new Version.
+        If the bucket versioning is `Suspended`, the current object version will be set to `null`, so if setting a new
+        object at the same key, we will override it at the `null` versionId entry.
+        :param object_key: the key of the Object we are setting
+        :param s3_object: the S3 object or S3DeleteMarker to set
+        :return: None
+        """
         self._store[object_key][s3_object.version_id] = S3Object
 
     def pop(
@@ -522,7 +380,6 @@ class VersionedKeyStore:
         if not versions:
             return None
 
-        # TODO: pop key if empty?
         object_version = versions.pop(version_id, default)
         if not versions:
             self._store.pop(object_key)
@@ -533,6 +390,7 @@ class VersionedKeyStore:
         if with_versions:
             return [object_version for values in self._store.values() for object_version in values]
 
+        # if `with_versions` is False, then we need to return only the current version if it's not a DeleteMarker
         objects = []
         for object_key, versions in self._store.items():
             # we're getting the last set object in the versions dictionary
@@ -591,6 +449,10 @@ class BucketCorsIndexV2:
 
 
 class PartialStream(RawIOBase):
+    """
+    This utility class allows to return a range from the underlying stream.
+    """
+
     def __init__(
         self, base_stream: IO[bytes] | LockedSpooledTemporaryFile, range_data: ParsedRange
     ):

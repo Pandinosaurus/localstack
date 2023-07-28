@@ -29,7 +29,7 @@ from botocore.exceptions import ClientError
 
 from localstack import config, constants
 from localstack.aws.api.s3 import StorageClass
-from localstack.config import LEGACY_S3_PROVIDER, STREAM_S3_PROVIDER
+from localstack.config import LEGACY_S3_PROVIDER, NATIVE_S3_PROVIDER, STREAM_S3_PROVIDER
 from localstack.constants import (
     LOCALHOST_HOSTNAME,
     S3_VIRTUAL_HOSTNAME,
@@ -117,8 +117,8 @@ def is_asf_provider():
     return not LEGACY_S3_PROVIDER
 
 
-def is_v3_provider():
-    return True
+def is_native_provider():
+    return NATIVE_S3_PROVIDER
 
 
 @pytest.fixture(scope="function")
