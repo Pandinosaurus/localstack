@@ -450,7 +450,7 @@ class BucketCorsIndexV2:
 
 class PartialStream(RawIOBase):
     """
-    This utility class allows to return a range from the underlying stream.
+    This utility class allows to return a range from the underlying stream representing an S3 Object.
     """
 
     def __init__(
@@ -467,7 +467,7 @@ class PartialStream(RawIOBase):
         else:
             amount = min(self._max_length, s)
 
-        with self._base_stream.lock:
+        with self._base_stream.position_lock:
             self._base_stream.seek(self._pos)
             data = self._base_stream.read(amount)
 

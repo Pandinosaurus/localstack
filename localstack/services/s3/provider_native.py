@@ -3,7 +3,7 @@ import datetime
 import hashlib
 import logging
 from secrets import token_urlsafe
-from typing import IO, Iterator, Optional
+from typing import IO, Optional
 
 from localstack import config
 from localstack.aws.api import CommonServiceException, RequestContext, handler
@@ -168,6 +168,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             object_lock_enabled_for_bucket=request.get("ObjectLockEnabledForBucket"),
         )
         store.buckets[bucket_name] = s3_bucket
+        self._storage_backend.create_bucket_directory(bucket_name)
 
         # Location is always contained in response -> full url for LocationConstraint outside us-east-1
         location = (
@@ -193,6 +194,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             )
 
         store.buckets.pop(bucket)
+        self._storage_backend.delete_bucket_directory(bucket)
 
     def list_buckets(
         self,
@@ -436,8 +438,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if range_header := request.get("Range"):
             range_data = parse_range_header(range_header, s3_object.size)
-            response["Body"] = get_body_iterator(
-                stream=fileobj,
+            response["Body"] = fileobj.get_locked_range_stream_iterator(
                 max_length=range_data.content_length,
                 begin=range_data.begin,
             )
@@ -447,7 +448,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             ] = range_data.content_length  # TODO: should we set it for chunked encoding?
             response["StatusCode"] = 206
         else:
-            response["Body"] = get_body_iterator(stream=fileobj, max_length=s3_object.size)
+            response["Body"] = fileobj.get_locked_stream_iterator()
 
         # TODO: missing returned fields
         #     Expiration: Optional[Expiration]
@@ -778,10 +779,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             version_id=dest_version_id,
         )
 
-        with src_fileobj.lock:
-            _, _, calculated_checksum_value = readinto_fileobj(
-                src_fileobj, dest_fileobj, checksum_algorithm
-            )
+        _, _, calculated_checksum_value = read_from_fileobj_into_fileobj(
+            src_fileobj, dest_fileobj, checksum_algorithm
+        )
 
         s3_object = S3Object(
             key=dest_key,
@@ -1260,44 +1260,17 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         return RestoreObjectOutput(StatusCode=status_code)
 
 
-# TODO: remove from here, find its spot??
-# TODO: implement Abstract stream class with .lock attributes, so that we don't need to Union all different
-#  StorageBackend file objects
-def get_body_iterator(
-    stream: IO[bytes] | LockedSpooledTemporaryFile, max_length: int, begin: int = 0
-) -> Iterator[bytes]:
-    def get_stream_iterator() -> Iterator[bytes]:
-        pos = begin
-        _max_length = max_length
-        while True:
-            # don't read more than the max content-length
-            amount = min(_max_length, S3_CHUNK_SIZE)
-            with stream.lock:
-                stream.seek(pos)
-                data = stream.read(amount)
-            if not data:
-                return b""
-
-            read = len(data)
-            pos += read
-            _max_length -= read
-
-            yield data
-
-    return get_stream_iterator()
-
-
 def readinto_fileobj(
     value: IO[bytes] | PartialStream,
     buffer: LockedSpooledTemporaryFile,
     checksum_algorithm: Optional[ChecksumAlgorithm] = None,
 ) -> tuple[ObjectSize, ETag, Optional[str]]:
-    with buffer.lock:
+    with buffer.write_lock:
         buffer.seek(0)
         buffer.truncate()
         # We have 2 cases:
         # The client gave a checksum value, we will need to compute the value and validate it against
-        # or the client have an algorithm value only and we need to compute the checksum
+        # or the client have an algorithm value only, and we need to compute the checksum
         if checksum_algorithm:
             checksum = get_s3_checksum(checksum_algorithm)
 
@@ -1312,6 +1285,48 @@ def readinto_fileobj(
         etag = etag.hexdigest()
         size = buffer.tell()
         buffer.seek(0)
+
+        if checksum_algorithm:
+            calculated_checksum = base64.b64encode(checksum.digest()).decode()
+            return size, etag, calculated_checksum
+
+        return size, etag, None
+
+
+def read_from_fileobj_into_fileobj(
+    src_fileobj: LockedSpooledTemporaryFile,
+    dest_fileobj: LockedSpooledTemporaryFile,
+    checksum_algorithm: Optional[ChecksumAlgorithm] = None,
+) -> tuple[ObjectSize, ETag, Optional[str]]:
+    with dest_fileobj.write_lock, src_fileobj.read_lock:
+        dest_fileobj.seek(0)
+        dest_fileobj.truncate()
+        # We have 2 cases:
+        # The client gave a checksum value, we will need to compute the value and validate it against
+        # or the client have an algorithm value only, and we need to compute the checksum
+        if checksum_algorithm:
+            checksum = get_s3_checksum(checksum_algorithm)
+
+        etag = hashlib.md5(usedforsecurity=False)
+
+        pos = 0
+        while True:
+            with src_fileobj.position_lock:
+                src_fileobj.seek(pos)
+                data = src_fileobj.read(S3_CHUNK_SIZE)
+
+                if not data:
+                    break
+
+            dest_fileobj.write(data)
+            pos += len(data)
+            etag.update(data)
+            if checksum_algorithm:
+                checksum.update(data)
+
+        etag = etag.hexdigest()
+        size = dest_fileobj.tell()
+        dest_fileobj.seek(0)
 
         if checksum_algorithm:
             calculated_checksum = base64.b64encode(checksum.digest()).decode()

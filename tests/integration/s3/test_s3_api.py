@@ -8,9 +8,6 @@ from localstack import config
 
 @pytest.mark.skipif(condition=not config.NATIVE_S3_PROVIDER)
 class TestS3BucketCRUD:
-    def test_create_bucket(self, s3_create_bucket):
-        pass
-
     def test_delete_bucket_with_objects(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())
         key_name = "test-delete"
