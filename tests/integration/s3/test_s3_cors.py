@@ -99,7 +99,6 @@ class TestS3Cors:
 
         response = requests.options(key_url)
         assert response.status_code == 400
-        # TODO: match_headers
         # yes, a body in an `options` request
         parsed_response = xmltodict.parse(response.content)
         snapshot.match("options-no-origin", parsed_response)
@@ -109,7 +108,12 @@ class TestS3Cors:
         )
         assert response.status_code == 403
         parsed_response = xmltodict.parse(response.content)
-        snapshot.match("options-with-origin", parsed_response)
+        snapshot.match("options-with-origin-and-method", parsed_response)
+
+        response = requests.options(key_url, headers={"Origin": "whatever"})
+        assert response.status_code == 403
+        parsed_response = xmltodict.parse(response.content)
+        snapshot.match("options-with-origin-no-method", parsed_response)
 
     @markers.parity.aws_validated
     def test_cors_http_get_no_config(self, s3_bucket, snapshot, aws_client, allow_bucket_acl):
@@ -219,6 +223,7 @@ class TestS3Cors:
             "$..Headers.Connection",  # TODO: fix me? OPTIONS with body is missing it
             "$..Headers.Content-Length",  # TODO: fix me? not supposed to be here, OPTIONS with body
             "$..Headers.Transfer-Encoding",  # TODO: fix me? supposed to be chunked, fully missing for OPTIONS with body (to be expected, honestly)
+            "$..Headers.x-amz-server-side-encryption",  # TODO: fix default bucket value
         ]
     )
     def test_cors_match_origins(self, s3_bucket, match_headers, aws_client, allow_bucket_acl):
@@ -305,6 +310,7 @@ class TestS3Cors:
             "$..Headers.Connection",  # TODO: fix me? OPTIONS with body is missing it
             "$..Headers.Content-Length",  # TODO: fix me? not supposed to be here, OPTIONS with body
             "$..Headers.Transfer-Encoding",  # TODO: fix me? supposed to be chunked, fully missing for OPTIONS with body (to be expected, honestly)
+            "$..Headers.x-amz-server-side-encryption",  # TODO: fix default bucket value
             "$.put-op.Body",  # TODO: We should not return a body for almost all PUT requests
             "$.put-op.Headers.Content-Type",  # issue with default Response values
         ]
@@ -366,6 +372,7 @@ class TestS3Cors:
             "$..Headers.Connection",  # TODO: fix me? OPTIONS with body is missing it
             "$..Headers.Content-Length",  # TODO: fix me? not supposed to be here, OPTIONS with body
             "$..Headers.Transfer-Encoding",
+            "$..Headers.x-amz-server-side-encryption",  # TODO: fix default bucket value
             # TODO: fix me? supposed to be chunked, fully missing for OPTIONS with body (to be expected, honestly)
             "$.put-op.Body",  # TODO: We should not return a body for almost all PUT requests
             "$.put-op.Headers.Content-Type",  # issue with default Response values
