@@ -430,9 +430,6 @@ LEGACY_S3_PROVIDER = os.environ.get("PROVIDER_OVERRIDE_S3", "") == "legacy"
 # whether the S3 streaming provider is enabled (beware, it breaks persistence for now)
 STREAM_S3_PROVIDER = os.environ.get("PROVIDER_OVERRIDE_S3", "") == "stream"
 
-if not os.environ.get("PROVIDER_OVERRIDE_S3", ""):
-    os.environ["PROVIDER_OVERRIDE_S3"] = "native"
-
 # whether the S3 streaming provider is enabled (beware, it breaks persistence for now)
 NATIVE_S3_PROVIDER = os.environ.get("PROVIDER_OVERRIDE_S3", "") == "native"
 
