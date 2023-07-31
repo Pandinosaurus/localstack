@@ -149,7 +149,10 @@ class S3CorsHandler(Handler):
 
                     context.operation = self._get_op_from_request(request)
                     raise AccessForbidden(
-                        message, HostId=FAKE_HOST_ID, Method="OPTIONS", ResourceType="BUCKET"
+                        message,
+                        HostId=FAKE_HOST_ID,
+                        Method=request.headers.get("Access-Control-Request-Method", "OPTIONS"),
+                        ResourceType="BUCKET",
                     )
 
                 # we return without adding any CORS headers, we could even block the request with 403 here
