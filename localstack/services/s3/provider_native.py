@@ -1339,7 +1339,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             expires=request.get("Expires"),
             user_metadata=request.get("Metadata"),
             system_metadata=system_metadata,
-            expiry=request.get("Expires"),
             checksum_algorithm=checksum_algorithm,
             encryption=request.get("ServerSideEncryption"),
             kms_key_id=request.get("SSEKMSKeyId"),
@@ -1354,6 +1353,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         )
 
         s3_bucket.multiparts[s3_multipart.id] = s3_multipart
+        self._storage_backend.create_upload_directory(
+            bucket_name=bucket_name, upload_id=s3_multipart.id
+        )
 
         # TODO: tags: do we have tagging service or do we manually handle? see utils TaggingService
         #  add to store
@@ -1618,6 +1620,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         s3_bucket.objects.set(key, s3_object)
 
         # remove the multipart now that it's complete
+        self._storage_backend.delete_upload_directory(bucket, s3_multipart.id)
         s3_bucket.multiparts.pop(s3_multipart.id, None)
 
         # TODO: validate if you provide wrong checksum compared to the given algorithm? should you calculate it anyway
@@ -1672,6 +1675,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             )
 
         self._storage_backend.delete_multipart_fileobjs(bucket, upload_id)
+        self._storage_backend.delete_upload_directory(bucket, upload_id)
         response = AbortMultipartUploadOutput()
         # TODO: requestCharged
         return response
@@ -1733,8 +1737,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         response["PartNumberMarker"] = last_part - 1 if parts else 0
         response["NextPartNumberMarker"] = last_part
 
-        if s3_multipart.checksum_value:
-            response["ChecksumAlgorithm"] = s3_multipart.checksum_value
+        if s3_multipart.object.checksum_algorithm:
+            response["ChecksumAlgorithm"] = s3_multipart.object.checksum_algorithm
 
         return response
 
