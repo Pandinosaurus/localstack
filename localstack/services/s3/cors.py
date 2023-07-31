@@ -162,14 +162,13 @@ class S3CorsHandler(Handler):
 
         if not (rule := self.match_rules(request, rules)):
             if is_options_request:
-                ex = AccessForbidden(
-                    "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec."
-                )
-                ex.HostId = FAKE_HOST_ID
-                ex.Method = request.headers.get("Access-Control-Request-Method")
-                ex.ResourceType = "OBJECT"
                 context.operation = self._get_op_from_request(request)
-                raise ex
+                raise AccessForbidden(
+                    "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec.",
+                    HostId=FAKE_HOST_ID,
+                    Method=request.headers.get("Access-Control-Request-Method"),
+                    ResourceType="OBJECT",
+                )
 
             if is_options_request:
                 stop_options_chain()
