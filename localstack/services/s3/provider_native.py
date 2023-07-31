@@ -1590,6 +1590,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             pass
 
         parts = multipart_upload.get("Parts", [])
+        if not parts:
+            raise InvalidRequest("You must specify at least one part")
+
         parts_numbers = [part.get("PartNumber") for part in parts]
         # sorted is very fast (fastest) if the list is already sorted, which should be the case
         if sorted(parts_numbers) != parts_numbers:
