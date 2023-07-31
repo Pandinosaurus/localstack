@@ -593,6 +593,7 @@ class TestS3:
         assert response["Body"].read() == b"test"
 
     @markers.parity.aws_validated
+    @markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])
     def test_metadata_header_character_decoding(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
         # Object metadata keys should accept keys with underscores
