@@ -1,6 +1,6 @@
 {
   "tests/integration/s3/test_s3_cors.py::TestS3Cors::test_cors_http_options_no_config": {
-    "recorded-date": "31-07-2023, 12:31:34",
+    "recorded-date": "31-07-2023, 18:24:51",
     "recorded-content": {
       "options-no-origin": {
         "Error": {
@@ -10,13 +10,23 @@
           "RequestId": "<request-id:1>"
         }
       },
-      "options-with-origin": {
+      "options-with-origin-and-method": {
         "Error": {
           "Code": "AccessForbidden",
           "HostId": "host-id",
           "Message": "CORSResponse: CORS is not enabled for this bucket.",
           "Method": "PUT",
           "RequestId": "<request-id:2>",
+          "ResourceType": "BUCKET"
+        }
+      },
+      "options-with-origin-no-method": {
+        "Error": {
+          "Code": "AccessForbidden",
+          "HostId": "host-id",
+          "Message": "CORSResponse: CORS is not enabled for this bucket.",
+          "Method": "OPTIONS",
+          "RequestId": "<request-id:3>",
           "ResourceType": "BUCKET"
         }
       }
