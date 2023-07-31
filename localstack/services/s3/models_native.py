@@ -400,7 +400,7 @@ class S3Multipart:
         parts_buffers: list[LockedSpooledTemporaryFile],
     ):
         def reset_buffer():
-            with buffer.lock:
+            with buffer.position_lock:
                 buffer.seek(0)
                 buffer.truncate()
 
@@ -409,42 +409,44 @@ class S3Multipart:
         # if self.object.checksum_algorithm:
         #     checksum_key = f"Checksum{self.object.checksum_algorithm.upper()}"
         object_etag = hashlib.md5(usedforsecurity=False)
+        with buffer.write_lock:
+            pos = 0
+            for index, part in enumerate(parts):
+                part_number = part["PartNumber"]
+                part_etag = part["ETag"]
 
-        pos = 0
-        for index, part in enumerate(parts):
-            part_number = part["PartNumber"]
-            part_etag = part["ETag"]
+                s3_part = self.parts.get(part_number)
+                if not s3_part or s3_part.etag != part_etag.strip('"'):
+                    reset_buffer()
+                    # raise InvalidPart()
+                    raise
 
-            s3_part = self.parts.get(part_number)
-            if not s3_part or s3_part.etag != part_etag.strip('"'):
-                reset_buffer()
-                # raise InvalidPart()
-                raise
+                # TODO: this part is currently not implemented, time permitting
+                # part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
+                # if part_checksum and part_checksum != s3_part.checksum_value:
+                #     reset_buffer()
+                #     raise Exception()
 
-            # TODO: this part is currently not implemented, time permitting
-            # part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
-            # if part_checksum and part_checksum != s3_part.checksum_value:
-            #     reset_buffer()
-            #     raise Exception()
+                if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
+                    reset_buffer()
+                    # raise EntityTooSmall()
+                    raise
 
-            if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
-                reset_buffer()
-                # raise EntityTooSmall()
-                raise
+                stream_value = parts_buffers[index]
 
-            stream_value = parts_buffers[index]
+                # we're iterating over the parts which can't be retrieve directly, so we don't mind totally locking
+                # the stream during completion
+                with stream_value.position_lock, stream_value.read_lock:
+                    while data := stream_value.read(S3_CHUNK_SIZE):
+                        buffer.write(data)
+                        pos += len(data)
 
-            with stream_value.lock, buffer.lock:
-                while data := stream_value.read(S3_CHUNK_SIZE):
-                    buffer.write(data)
-                    pos += len(data)
+                object_etag.update(bytes.fromhex(s3_part.etag))
+                self.object.parts.append((pos, s3_part.size))
 
-            object_etag.update(bytes.fromhex(s3_part.etag))
-            self.object.parts.append((pos, s3_part.size))
+            multipart_etag = f"{object_etag.hexdigest()}-{len(parts)}"
+            self.object.etag = multipart_etag
 
-        multipart_etag = f"{object_etag.hexdigest()}-{len(parts)}"
-        self.object.etag = multipart_etag
-        with buffer.lock:
             buffer.seek(0, 2)
             self.object.size = buffer.tell()
             buffer.seek(0)
@@ -487,6 +489,17 @@ class VersionedKeyStore:
 
     def __init__(self):
         self._store = defaultdict(dict)
+
+    @classmethod
+    def from_key_store(cls, keystore: KeyStore) -> "VersionedKeyStore":
+        new_versioned_keystore = cls()
+        for s3_object in keystore.values():
+            # TODO: maybe do the object mutation inside the provider instead? but would need to iterate twice
+            #  or do this whole operation inside the provider instead, when actually working on versioning
+            s3_object.version_id = "null"
+            new_versioned_keystore.set(object_key=s3_object.key, s3_object=s3_object)
+
+        return new_versioned_keystore
 
     def get(
         self, object_key: ObjectKey, version_id: ObjectVersionId = None
