@@ -216,8 +216,9 @@ class TemporaryStorageBackend(BaseStorageBackend):
         self._filesystem.get(bucket_name, {}).get("multiparts", {}).pop(key, None)
 
 
-class LockedFile:
-    def __init__(self):
+class LockedFileMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         # this lock allows us to make `seek` and `read` operation as an atomic one, without an external reader
         # modifying the internal position of the stream
         self.position_lock = RLock()
@@ -229,7 +230,7 @@ class LockedFile:
         self.write_lock = readwrite_lock.gen_wlock()
 
 
-class LockedSpooledTemporaryFile(SpooledTemporaryFile, LockedFile):
+class LockedSpooledTemporaryFile(LockedFileMixin, SpooledTemporaryFile):
     def seekable(self) -> bool:
         return True
 
