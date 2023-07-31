@@ -8755,5 +8755,81 @@
         }
       }
     }
+  },
+  "tests/integration/s3/test_s3.py::TestS3::test_multipart_complete_multipart_too_small": {
+    "recorded-date": "01-08-2023, 00:50:02",
+    "recorded-content": {
+      "upload-part1": {
+        "ETag": "\"8d777f385d3dfec8815d20f7496026dc\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "upload-part2": {
+        "ETag": "\"8d777f385d3dfec8815d20f7496026dc\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "complete-exc-no-parts": {
+        "Error": {
+          "Code": "InvalidRequest",
+          "Message": "You must specify at least one part"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "complete-exc-too-small": {
+        "Error": {
+          "Code": "EntityTooSmall",
+          "ETag": "8d777f385d3dfec8815d20f7496026dc",
+          "Message": "Your proposed upload is smaller than the minimum allowed size",
+          "MinSizeAllowed": "5242880",
+          "PartNumber": "1",
+          "ProposedSize": "4"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
+  },
+  "tests/integration/s3/test_s3.py::TestS3::test_multipart_complete_multipart_wrong_part": {
+    "recorded-date": "01-08-2023, 01:24:08",
+    "recorded-content": {
+      "complete-exc-wrong-part-number": {
+        "Error": {
+          "Code": "InvalidPart",
+          "ETag": "8d777f385d3dfec8815d20f7496026dc",
+          "Message": "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.",
+          "PartNumber": "2",
+          "UploadId": "<upload-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      },
+      "complete-exc-wrong-etag": {
+        "Error": {
+          "Code": "InvalidPart",
+          "ETag": "d41d8cd98f00b204e9800998ecf8427e",
+          "Message": "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.",
+          "PartNumber": "1",
+          "UploadId": "<upload-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 400
+        }
+      }
+    }
   }
 }

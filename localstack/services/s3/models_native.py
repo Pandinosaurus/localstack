@@ -19,11 +19,13 @@ from localstack.aws.api.s3 import (
     ChecksumAlgorithm,
     CompletedPartList,
     CORSConfiguration,
+    EntityTooSmall,
     ETag,
     Expiration,
     IntelligentTieringConfiguration,
     IntelligentTieringId,
     InvalidArgument,
+    InvalidPart,
     LifecycleRules,
     LoggingEnabled,
     Metadata,
@@ -370,7 +372,7 @@ class S3Multipart:
         system_metadata: Optional[Metadata] = None,
         initiator: Optional[Owner] = None,
     ):
-        self.id = token_urlsafe(10)  # TODO, validate format, could it be b64 urlsafe encoded?
+        self.id = token_urlsafe(96)  # MultipartUploadId is 128 characters long
         self.initiated = datetime.utcnow()
         self.parts = {}
         self.initiator = initiator
@@ -413,13 +415,17 @@ class S3Multipart:
             pos = 0
             for index, part in enumerate(parts):
                 part_number = part["PartNumber"]
-                part_etag = part["ETag"]
+                part_etag = part["ETag"].strip('"')
 
                 s3_part = self.parts.get(part_number)
-                if not s3_part or s3_part.etag != part_etag.strip('"'):
+                if not s3_part or s3_part.etag != part_etag:
                     reset_buffer()
-                    # raise InvalidPart()
-                    raise
+                    raise InvalidPart(
+                        "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.",
+                        ETag=part_etag,
+                        PartNumber=part_number,
+                        UploadId=self.id,
+                    )
 
                 # TODO: this part is currently not implemented, time permitting
                 # part_checksum = part.get(checksum_key) if self.object.checksum_algorithm else None
@@ -429,8 +435,13 @@ class S3Multipart:
 
                 if index != last_part_index and s3_part.size < S3_UPLOAD_PART_MIN_SIZE:
                     reset_buffer()
-                    # raise EntityTooSmall()
-                    raise
+                    raise EntityTooSmall(
+                        "Your proposed upload is smaller than the minimum allowed size",
+                        ETag=part_etag,
+                        PartNumber=part_number,
+                        MinSizeAllowed=S3_UPLOAD_PART_MIN_SIZE,
+                        ProposedSize=s3_part.size,
+                    )
 
                 stream_value = parts_buffers[index]
 
