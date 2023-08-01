@@ -1512,7 +1512,10 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         self._add_error_tags(error, root, mime_type)
         request_id_element = ETree.SubElement(root, "RequestId")
         request_id_element.text = request_id
-        self._add_additional_error_tags(error, root, shape, mime_type)
+
+        header_params, payload_params = self._partition_error_members(error, shape)
+        self._add_additional_error_tags_from_parameters(payload_params, root, shape, mime_type)
+        self._process_header_members(header_params, response, shape)
 
         response.set_response(self._encode_payload(self._node_to_string(root, mime_type)))
 
@@ -1567,6 +1570,40 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         # some tools (Serverless) require a newline after the "<?xml ...>\n" preamble line, e.g., for LocationConstraint
         if root and not root.tail:
             root.tail = "\n"
+
+    def _add_additional_error_tags_from_parameters(
+        self, parameters: dict, node: ETree, shape: StructureShape, mime_type: str
+    ):
+        # If there is an error shape with members which should be set, they need to be added to the node
+        if parameters:
+            # Serialize the remaining params
+            root_name = shape.serialization.get("name", shape.name)
+            pseudo_root = ETree.Element("")
+            self._serialize(shape, parameters, pseudo_root, root_name, mime_type)
+            real_root = list(pseudo_root)[0]
+            # Add the child elements to the already created root error element
+            for child in list(real_root):
+                node.append(child)
+
+    def _partition_error_members(
+        self, error: ServiceException, shape: Optional[Shape]
+    ) -> Tuple[dict, dict]:
+        """Separates the top-level keys in the given ServiceException into header- and payload-located params."""
+        header_params = {}
+        payload_params = {}
+        shape_members = shape.members
+        for name in shape_members:
+            member_shape = shape_members[name]
+            if name.lower() not in ["code", "message"] and (
+                error_param := getattr(error, name, None)
+            ):
+                location = member_shape.serialization.get("location")
+                if location:
+                    header_params[name] = error_param
+                else:
+                    payload_params[name] = error_param
+
+        return header_params, payload_params
 
 
 class SqsResponseSerializer(QueryResponseSerializer):
