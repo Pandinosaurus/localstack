@@ -16,6 +16,7 @@ from localstack.aws.api.s3 import (
     BucketAccelerateStatus,
     BucketName,
     BucketRegion,
+    BucketVersioningStatus,
     ChecksumAlgorithm,
     CompletedPartList,
     CORSConfiguration,
@@ -85,7 +86,7 @@ class S3Bucket:
     creation_date: datetime
     multiparts: dict[MultipartUploadId, "S3Multipart"]
     objects: Union["KeyStore", "VersionedKeyStore"]
-    versioning_status: Literal[None, "Enabled", "Disabled"]
+    versioning_status: BucketVersioningStatus | None
     lifecycle_rules: LifecycleRules
     policy: Optional[Policy]
     website_configuration: WebsiteConfiguration
@@ -177,7 +178,8 @@ class S3Bucket:
                         Method=http_method,
                         ResourceType="DeleteMarker",
                         DeleteMarker=True,
-                        Allow="delete",
+                        Allow="DELETE",
+                        VersionId=s3_object_version.version_id,
                     )
                 return s3_object_version
 
@@ -191,6 +193,7 @@ class S3Bucket:
                     "The specified key does not exist.",
                     Key=key,
                     DeleteMarker=True,
+                    VersionId=s3_object.version_id,
                 )
 
         return s3_object
@@ -488,6 +491,9 @@ class KeyStore:
     def is_empty(self) -> bool:
         return not self._store
 
+    def __contains__(self, item):
+        return item in self._store
+
 
 class VersionedKeyStore:
     """
@@ -536,7 +542,11 @@ class VersionedKeyStore:
         :param s3_object: the S3 object or S3DeleteMarker to set
         :return: None
         """
-        self._store[object_key][s3_object.version_id] = S3Object
+        existing_s3_object = self.get(object_key)
+        if existing_s3_object:
+            existing_s3_object.is_current = False
+
+        self._store[object_key][s3_object.version_id] = s3_object
 
     def pop(
         self, object_key: ObjectKey, version_id: ObjectVersionId = None, default=None
@@ -548,12 +558,19 @@ class VersionedKeyStore:
         object_version = versions.pop(version_id, default)
         if not versions:
             self._store.pop(object_key)
+        else:
+            existing_s3_object = self.get(object_key)
+            existing_s3_object.is_current = True
 
         return object_version
 
     def values(self, with_versions: bool = False) -> list[S3Object | S3DeleteMarker]:
         if with_versions:
-            return [object_version for values in self._store.values() for object_version in values]
+            return [
+                object_version
+                for values in self._store.values()
+                for object_version in values.values()
+            ]
 
         # if `with_versions` is False, then we need to return only the current version if it's not a DeleteMarker
         objects = []
@@ -571,6 +588,9 @@ class VersionedKeyStore:
 
     def is_empty(self) -> bool:
         return not self._store
+
+    def __contains__(self, item):
+        return item in self._store
 
 
 class S3StoreV2(BaseStore):
