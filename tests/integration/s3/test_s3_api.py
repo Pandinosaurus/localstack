@@ -13,6 +13,7 @@ from localstack.utils.strings import short_uid
     condition=not config.NATIVE_S3_PROVIDER,
     reason="These are WIP tests for the new native S3 provider",
 )
+@markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])  # TODO: encryption
 class TestS3BucketCRUD:
     @markers.parity.aws_validated
     def test_delete_bucket_with_objects(self, s3_bucket, aws_client, snapshot):
@@ -71,6 +72,7 @@ class TestS3BucketCRUD:
     condition=not config.NATIVE_S3_PROVIDER,
     reason="These are WIP tests for the new native S3 provider",
 )
+@markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])  # TODO: encryption
 class TestS3ObjectCRUD:
     @markers.parity.aws_validated
     def test_delete_object(self, s3_bucket, aws_client, snapshot):
