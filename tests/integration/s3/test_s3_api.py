@@ -296,9 +296,6 @@ class TestS3ObjectCRUD:
     def test_delete_object_locked(self):
         pass
 
-    def test_delete_object_on_suspended_bucket(self):
-        pass
-
     @markers.parity.aws_validated
     def test_get_object_with_version_unversioned_bucket(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())
@@ -361,6 +358,51 @@ class TestS3ObjectCRUD:
 
         get_object = aws_client.s3.get_object(Bucket=s3_bucket, Key=key_name)
         snapshot.match("get-object-current", get_object)
+
+    @markers.parity.aws_validated
+    def test_delete_object_on_suspended_bucket(self, s3_bucket, aws_client, snapshot):
+        snapshot.add_transformer(snapshot.transform.s3_api())
+        # enable versioning on the bucket
+        aws_client.s3.put_bucket_versioning(
+            Bucket=s3_bucket, VersioningConfiguration={"Status": "Enabled"}
+        )
+        key_name = "test-delete-suspended"
+        for i in range(2):
+            put_object = aws_client.s3.put_object(
+                Bucket=s3_bucket, Key=key_name, Body=f"test-version-{i}"
+            )
+            snapshot.match(f"put-object-{i}", put_object)
+
+        aws_client.s3.put_bucket_versioning(
+            Bucket=s3_bucket, VersioningConfiguration={"Status": "Suspended"}
+        )
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended", list_object_versions)
+        assert len(list_object_versions["Versions"]) == 2
+
+        # delete object with no version specified
+        delete_object_no_version = aws_client.s3.delete_object(Bucket=s3_bucket, Key=key_name)
+        snapshot.match("delete-object-no-version", delete_object_no_version)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended-delete", list_object_versions)
+        # assert len(list_object_versions["Versions"]) == 2
+
+        put_object = aws_client.s3.put_object(
+            Bucket=s3_bucket, Key=key_name, Body="test-version-suspended-after-delete"
+        )
+        snapshot.match("put-object-suspended", put_object)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended-put", list_object_versions)
+
+        # delete object with no version specified again, should overwrite the last object
+        delete_object_no_version = aws_client.s3.delete_object(Bucket=s3_bucket, Key=key_name)
+        snapshot.match("delete-object-no-version-after-put", delete_object_no_version)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended-after-put", list_object_versions)
 
     @markers.parity.aws_validated
     def test_list_object_versions_order_unversioned(self, s3_bucket, aws_client, snapshot):
