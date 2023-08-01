@@ -66,11 +66,10 @@ class BaseStorageBackend(abc.ABC):
 
     @staticmethod
     def _get_fileobj_key(object_key: ObjectKey, version_id: ObjectVersionId = None) -> str:
-        return str(hash(f"{object_key}?{version_id}"))
+        return str(hash(f"{object_key}?{version_id or 'null'}"))
 
     @staticmethod
     def _get_fileobj_part(multipart_id: MultipartUploadId) -> str:
-        # TODO: might not need to hash it? just use the upload_id?
         return str(hash(multipart_id))
 
 

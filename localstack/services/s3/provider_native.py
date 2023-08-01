@@ -393,7 +393,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         response = PutObjectOutput(
             ETag=s3_object.quoted_etag,
         )
-        if s3_object.version_id:  # TODO: better way?
+        if s3_bucket.versioning_status == "Enabled":
             response["VersionId"] = s3_object.version_id
 
         if s3_object.checksum_algorithm:
@@ -1818,6 +1818,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         elif s3_bucket.versioning_status == "Enabled" and versioning_configuration == "Suspended":
             for current_object_version in s3_bucket.objects.values():
                 current_object_version.version_id = "null"
+                # TODO: update filestorage
 
         s3_bucket.versioning_status = versioning_status
 
