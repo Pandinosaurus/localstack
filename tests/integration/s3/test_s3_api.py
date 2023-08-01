@@ -6,7 +6,10 @@ from botocore.exceptions import ClientError
 from localstack import config
 
 
-@pytest.mark.skipif(condition=not config.NATIVE_S3_PROVIDER)
+@pytest.mark.skipif(
+    condition=not config.NATIVE_S3_PROVIDER,
+    reason="These are WIP tests for the new native S3 provider",
+)
 class TestS3BucketCRUD:
     def test_delete_bucket_with_objects(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())
@@ -59,7 +62,10 @@ class TestS3BucketCRUD:
         snapshot.match("success-delete-bucket", delete_bucket)
 
 
-@pytest.mark.skipif(condition=not config.NATIVE_S3_PROVIDER)
+@pytest.mark.skipif(
+    condition=not config.NATIVE_S3_PROVIDER,
+    reason="These are WIP tests for the new native S3 provider",
+)
 class TestS3ObjectCRUD:
     def test_delete_object(self, s3_bucket, aws_client, snapshot):
         key_name = "test-delete"
