@@ -302,7 +302,6 @@ class TestS3ObjectCRUD:
     @markers.parity.aws_validated
     def test_get_object_with_version_unversioned_bucket(self, s3_bucket, aws_client, snapshot):
         snapshot.add_transformer(snapshot.transform.s3_api())
-
         key_name = "test-version"
         put_object = aws_client.s3.put_object(Bucket=s3_bucket, Key=key_name, Body="test-version")
         snapshot.match("put-object", put_object)
@@ -315,6 +314,53 @@ class TestS3ObjectCRUD:
 
         get_obj = aws_client.s3.get_object(Bucket=s3_bucket, Key=key_name, VersionId="null")
         snapshot.match("get-obj-with-null-version", get_obj)
+
+    @markers.parity.aws_validated
+    def test_put_object_on_suspended_bucket(self, s3_bucket, aws_client, snapshot):
+        snapshot.add_transformer(snapshot.transform.s3_api())
+        # enable versioning on the bucket
+        aws_client.s3.put_bucket_versioning(
+            Bucket=s3_bucket, VersioningConfiguration={"Status": "Enabled"}
+        )
+        key_name = "test-version"
+        for i in range(3):
+            put_object = aws_client.s3.put_object(
+                Bucket=s3_bucket, Key=key_name, Body=f"test-version-{i}"
+            )
+            snapshot.match(f"put-object-{i}", put_object)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-enabled", list_object_versions)
+        assert len(list_object_versions["Versions"]) == 3
+
+        aws_client.s3.put_bucket_versioning(
+            Bucket=s3_bucket, VersioningConfiguration={"Status": "Suspended"}
+        )
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended", list_object_versions)
+        assert len(list_object_versions["Versions"]) == 3
+
+        put_object = aws_client.s3.put_object(
+            Bucket=s3_bucket, Key=key_name, Body="test-version-suspended"
+        )
+        snapshot.match("put-object-suspended", put_object)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended-after-put", list_object_versions)
+        assert len(list_object_versions["Versions"]) == 4
+
+        put_object = aws_client.s3.put_object(
+            Bucket=s3_bucket, Key=key_name, Body="test-version-suspended"
+        )
+        snapshot.match("put-object-suspended-overwrite", put_object)
+
+        list_object_versions = aws_client.s3.list_object_versions(Bucket=s3_bucket)
+        snapshot.match("list-suspended-after-overwrite", list_object_versions)
+        assert len(list_object_versions["Versions"]) == 4
+
+        get_object = aws_client.s3.get_object(Bucket=s3_bucket, Key=key_name)
+        snapshot.match("get-object-current", get_object)
 
     @markers.parity.aws_validated
     def test_list_object_versions_order_unversioned(self, s3_bucket, aws_client, snapshot):
