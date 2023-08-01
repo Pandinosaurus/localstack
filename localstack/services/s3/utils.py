@@ -547,10 +547,12 @@ def add_expiration_days_to_datetime(user_datatime: datetime.datetime, exp_days: 
 def serialize_expiration_header(
     rule_id: str, lifecycle_exp: LifecycleExpiration, last_modified: datetime.datetime
 ):
-    if not (exp_date := lifecycle_exp.get("Date")):
-        exp_days = lifecycle_exp.get("Days")
+    if exp_days := lifecycle_exp.get("Days"):
         # AWS round to the next day at midnight UTC
         exp_date = add_expiration_days_to_datetime(last_modified, exp_days)
+    else:
+        exp_date = rfc_1123_datetime(lifecycle_exp["Date"])
+
     return f'expiry-date="{exp_date}", rule-id="{rule_id}"'
 
 
