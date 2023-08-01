@@ -939,6 +939,7 @@ class TestS3:
             )
         snapshot.match("abort-exc", e.value.response)
 
+    @pytest.mark.xfail(condition=not NATIVE_S3_PROVIDER, reason="not implemented in moto")
     @markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])
     @markers.parity.aws_validated
     def test_multipart_complete_multipart_too_small(self, s3_bucket, snapshot, aws_client):
@@ -971,6 +972,7 @@ class TestS3:
             )
         snapshot.match("complete-exc-too-small", e.value.response)
 
+    @pytest.mark.xfail(condition=not NATIVE_S3_PROVIDER, reason="not implemented in moto")
     @markers.parity.aws_validated
     def test_multipart_complete_multipart_wrong_part(self, s3_bucket, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.key_value("UploadId"))
