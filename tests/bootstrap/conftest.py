@@ -6,7 +6,6 @@ import pytest
 
 from localstack.utils.bootstrap import LocalstackContainer
 from localstack.utils.container_utils.container_client import PortMappings
-from localstack.utils.docker_utils import DOCKER_CLIENT
 
 LOG = logging.getLogger(__name__)
 
@@ -52,25 +51,21 @@ class ContainerFactory:
     def remove_all_containers(self):
         failures = []
         for container in self._containers:
-            if not container.id:
-                LOG.error(f"Container {container} missing container_id")
-                continue
-
-            # allow tests to stop the container manually
-            if not DOCKER_CLIENT.is_container_running(container.config.name):
+            if not container.running_container:
+                # container is not running
                 continue
 
             try:
-                DOCKER_CLIENT.stop_container(container_name=container.id, timeout=30)
+                container.running_container.shutdown()
             except Exception as e:
                 failures.append((container, e))
 
         if failures:
             for container, ex in failures:
-                if LOG.isEnabledFor(logging.DEBUG):
-                    LOG.error(f"Failed to remove container {container.id}", exc_info=ex)
-                else:
-                    LOG.error(f"Failed to remove container {container.id}")
+                LOG.error(
+                    f"Failed to remove container {container.running_container.id}",
+                    exc_info=LOG.isEnabledFor(logging.DEBUG),
+                )
 
 
 @pytest.fixture(scope="session")
