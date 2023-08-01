@@ -25,6 +25,7 @@ from localstack.aws.api.s3 import (
     CommonPrefix,
     CompletedMultipartUpload,
     CompleteMultipartUploadOutput,
+    ContentMD5,
     CopyObjectOutput,
     CopyObjectRequest,
     CopyObjectResult,
@@ -44,6 +45,7 @@ from localstack.aws.api.s3 import (
     ETag,
     FetchOwner,
     GetBucketLocationOutput,
+    GetBucketVersioningOutput,
     GetObjectAttributesOutput,
     GetObjectAttributesParts,
     GetObjectAttributesRequest,
@@ -102,6 +104,7 @@ from localstack.aws.api.s3 import (
     UploadPartOutput,
     UploadPartRequest,
     VersionIdMarker,
+    VersioningConfiguration,
 )
 from localstack.services.plugins import ServiceLifecycleHook
 from localstack.services.s3.codec import AwsChunkedDecoder
@@ -119,6 +122,7 @@ from localstack.services.s3.models_native import (
     S3Object,
     S3Part,
     S3StoreV2,
+    VersionedKeyStore,
     s3_stores_v2,
 )
 from localstack.services.s3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
@@ -218,8 +222,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # the bucket still contains objects
         if not s3_bucket.objects.is_empty():
+            message = "The bucket you tried to delete is not empty"
+            if s3_bucket.versioning_status:
+                message += ". You must delete all versions in the bucket."
             raise BucketNotEmpty(
-                message="The bucket you tried to delete is not empty",
+                message,
                 BucketName=bucket,
             )
 
@@ -376,11 +383,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             expiration=None,  # TODO, from lifecycle, or should it be updated with config?
             acl=None,
         )
-
-        if s3_bucket.versioning_status == "Enabled" and (
-            existing_s3_object := s3_bucket.objects.get(key)
-        ):
-            existing_s3_object.is_current = False
 
         s3_bucket.objects.set(key, s3_object)
 
@@ -592,6 +594,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # TODO: verify with Suspended bucket? does it override last version or still append?? big question
             #  I think it puts a delete marker with a `null` VersionId, which deletes the object under
             s3_bucket.objects.set(key, delete_marker)
+
             return DeleteObjectOutput(VersionId=delete_marker.version_id, DeleteMarker=True)
 
         if key not in s3_bucket.objects:
@@ -701,6 +704,10 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                     Key=object_key,
                     VersionId=version_id,
                 )
+                if isinstance(found_object, S3DeleteMarker):
+                    deleted_object["DeleteMarker"] = True
+                    deleted_object["DeleteMarkerVersionId"] = found_object.version_id
+
                 deleted.append(deleted_object)
 
             if isinstance(found_object, S3Object):
@@ -710,6 +717,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         # TODO: request charged
         response: DeleteObjectsOutput = {}
+        # AWS validated: the list of Deleted objects is unordered, multiple identical calls can return different results
         if errors:
             response["Errors"] = errors
         if not quiet:
@@ -835,12 +843,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         )
         # Object copied from Glacier object should not have expiry
         # TODO: verify this assumption from moto?
-
-        if dest_s3_bucket.versioning_status == "Enabled" and (
-            existing_s3_object := dest_s3_bucket.objects.get(dest_key)
-        ):
-            existing_s3_object.is_current = False
-
         dest_s3_bucket.objects.set(dest_key, s3_object)
 
         copy_object_result = CopyObjectResult(
@@ -1114,7 +1116,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         all_versions = s3_bucket.objects.values(with_versions=True)
         # sort by key, and last-modified-date, to get the last version first
-        all_versions.sort(key=lambda r: (r.key, r.last_modified))
+        all_versions.sort(key=lambda r: (r.key, -r.last_modified.timestamp()))
 
         for version in all_versions:
             key = version.key
@@ -1615,11 +1617,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         s3_object = s3_multipart.object
 
-        if s3_bucket.versioning_status == "Enabled" and (
-            existing_s3_object := s3_bucket.objects.get(key)
-        ):
-            existing_s3_object.is_current = False
-
         s3_bucket.objects.set(key, s3_object)
 
         # remove the multipart now that it's complete
@@ -1792,6 +1789,49 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         response["Uploads"] = uploads
 
         return response
+
+    def put_bucket_versioning(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        versioning_configuration: VersioningConfiguration,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        mfa: MFA = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+        if not (versioning_status := versioning_configuration.get("Status")):
+            raise CommonServiceException(
+                code="IllegalVersioningConfigurationException",
+                message="The Versioning element must be specified",
+            )
+
+        if versioning_status not in ("Enabled", "Suspended"):
+            raise MalformedXML()
+
+        if not s3_bucket.versioning_status:
+            s3_bucket.objects = VersionedKeyStore.from_key_store(s3_bucket.objects)
+
+        elif s3_bucket.versioning_status == "Enabled" and versioning_configuration == "Suspended":
+            for current_object_version in s3_bucket.objects.values():
+                current_object_version.version_id = "null"
+
+        s3_bucket.versioning_status = versioning_status
+
+    def get_bucket_versioning(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> GetBucketVersioningOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if not s3_bucket.versioning_status:
+            return GetBucketVersioningOutput()
+
+        return GetBucketVersioningOutput(Status=s3_bucket.versioning_status)
 
 
 def readinto_fileobj(
