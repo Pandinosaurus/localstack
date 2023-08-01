@@ -3298,7 +3298,9 @@ class TestS3:
         assert content_vhost == content_path_style
 
     @markers.parity.aws_validated
-    # @markers.snapshot.skip_snapshot_verify(paths=["$..Prefix"])
+    @markers.snapshot.skip_snapshot_verify(
+        condition=lambda: not is_native_provider(), paths=["$..Prefix"]
+    )
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..ContentLanguage", "$..VersionId"]
     )
