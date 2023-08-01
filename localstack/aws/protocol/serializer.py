@@ -1589,6 +1589,10 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         self, error: ServiceException, shape: Optional[Shape]
     ) -> Tuple[dict, dict]:
         """Separates the top-level keys in the given ServiceException into header- and payload-located params."""
+        if not isinstance(shape, StructureShape):
+            # If the shape isn't a structure, we default to the whole response being parsed in the body.
+            # Non-payload members are only loaded in the top-level hierarchy and those are always structures.
+            return {}, {}
         header_params = {}
         payload_params = {}
         shape_members = shape.members
