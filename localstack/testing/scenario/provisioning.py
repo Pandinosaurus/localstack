@@ -41,6 +41,7 @@ class InfraProvisioner:
     cloudformation_stacks: dict[str, dict]
     custom_cleanup_steps: list[Callable]
     custom_setup_steps: list[Callable]
+    skipped_provisioning: bool = False
 
     def __init__(self, aws_client: ServiceLevelClientFactory):
         self.cloudformation_stacks = {}
@@ -66,6 +67,7 @@ class InfraProvisioner:
         ):
             # TODO it's currently all or nothing -> deploying one new stack will most likely fail
             LOG.info("All stacks are already deployed. Skipping the provisioning.")
+            self.skipped_provisioning = True
             return
 
         self.run_manual_setup_tasks()
