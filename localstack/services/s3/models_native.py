@@ -252,8 +252,10 @@ class S3Object:
         acl: Optional[str] = None,  # TODO
     ):
         self.key = key
-        self.user_metadata = {k.lower(): v for k, v in user_metadata.items()}
-        self.system_metadata = system_metadata
+        self.user_metadata = (
+            {k.lower(): v for k, v in user_metadata.items()} if user_metadata else {}
+        )
+        self.system_metadata = system_metadata or {}
         self.version_id = version_id
         self.storage_class = storage_class or StorageClass.STANDARD
         self.etag = etag
@@ -596,7 +598,7 @@ class VersionedKeyStore:
         return item in self._store
 
 
-class S3StoreV2(BaseStore):
+class S3StoreNative(BaseStore):
     buckets: dict[BucketName, S3Bucket] = CrossRegionAttribute(default=dict)
     global_bucket_map: dict[BucketName, AccountId] = CrossAccountAttribute(default=dict)
     aws_managed_kms_key_id: SSEKMSKeyId = LocalAttribute(default=str)
@@ -678,4 +680,4 @@ class EncryptionParameters(NamedTuple):
     bucket_key_enabled: BucketKeyEnabled
 
 
-s3_stores_v2 = AccountRegionBundle[S3StoreV2]("s3", S3StoreV2)
+s3_stores_v2 = AccountRegionBundle[S3StoreNative]("s3", S3StoreNative)
