@@ -15,7 +15,6 @@ from localstack.aws.api.s3 import (
     Bucket,
     BucketAlreadyExists,
     BucketAlreadyOwnedByYou,
-    BucketKeyEnabled,
     BucketName,
     BucketNotEmpty,
     BypassGovernanceRetention,
@@ -99,7 +98,6 @@ from localstack.aws.api.s3 import (
     SSECustomerAlgorithm,
     SSECustomerKey,
     SSECustomerKeyMD5,
-    SSEKMSKeyId,
     StartAfter,
     StorageClass,
     Token,
@@ -120,6 +118,7 @@ from localstack.services.s3.exceptions import (
     MalformedXML,
 )
 from localstack.services.s3.models_native import (
+    EncryptionParameters,
     PartialStream,
     S3Bucket,
     S3DeleteMarker,
@@ -370,11 +369,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 f"Value for x-amz-checksum-{checksum_algorithm.lower()} header is invalid."
             )
 
-        (
-            encryption,
-            kms_key_id,
-            bucket_key_enabled,
-        ) = get_encryption_parameters_from_request_and_bucket(
+        encryption_parameters = get_encryption_parameters_from_request_and_bucket(
             request,
             s3_bucket,
             store,
@@ -391,9 +386,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             system_metadata=system_metadata,
             checksum_algorithm=checksum_algorithm,
             checksum_value=checksum_value,
-            encryption=encryption,
-            kms_key_id=kms_key_id,
-            bucket_key_enabled=bucket_key_enabled,
+            encryption=encryption_parameters.encryption,
+            kms_key_id=encryption_parameters.kms_key_id,
+            bucket_key_enabled=encryption_parameters.bucket_key_enabled,
             lock_mode=request.get("ObjectLockMode"),
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
@@ -467,7 +462,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if s3_object.user_metadata:
             response["Metadata"] = s3_object.user_metadata
 
-        if s3_object.parts:
+        if s3_object.parts and request.get("PartNumber"):
             response["PartsCount"] = len(s3_object.parts)
 
         if s3_object.version_id:
@@ -841,11 +836,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             src_fileobj, dest_fileobj, checksum_algorithm
         )
 
-        (
-            encryption,
-            kms_key_id,
-            bucket_key_enabled,
-        ) = get_encryption_parameters_from_request_and_bucket(request, dest_s3_bucket)
+        encryption_parameters = get_encryption_parameters_from_request_and_bucket(
+            request,
+            dest_s3_bucket,
+            store,
+        )
 
         s3_object = S3Object(
             key=dest_key,
@@ -857,9 +852,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             system_metadata=system_metadata,
             checksum_algorithm=request.get("ChecksumAlgorithm") or src_s3_object.checksum_algorithm,
             checksum_value=calculated_checksum_value or src_s3_object.checksum_value,
-            encryption=encryption,
-            kms_key_id=kms_key_id,
-            bucket_key_enabled=bucket_key_enabled,
+            encryption=encryption_parameters.encryption,
+            kms_key_id=encryption_parameters.kms_key_id,
+            bucket_key_enabled=encryption_parameters.bucket_key_enabled,
             lock_mode=request.get("ObjectLockMode"),
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
@@ -1359,6 +1354,12 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # TODO: validate the algorithm?
         checksum_algorithm = request.get("ChecksumAlgorithm")
 
+        encryption_parameters = get_encryption_parameters_from_request_and_bucket(
+            request,
+            s3_bucket,
+            store,
+        )
+
         # validate encryption values
 
         s3_multipart = S3Multipart(
@@ -1368,9 +1369,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             user_metadata=request.get("Metadata"),
             system_metadata=system_metadata,
             checksum_algorithm=checksum_algorithm,
-            encryption=request.get("ServerSideEncryption"),
-            kms_key_id=request.get("SSEKMSKeyId"),
-            bucket_key_enabled=request.get("BucketKeyEnabled"),
+            encryption=encryption_parameters.encryption,
+            kms_key_id=encryption_parameters.kms_key_id,
+            bucket_key_enabled=encryption_parameters.bucket_key_enabled,
             lock_mode=request.get("ObjectLockMode"),
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
@@ -2021,10 +2022,10 @@ def add_encryption_to_response(response: dict, s3_object: S3Object):
 
 
 def get_encryption_parameters_from_request_and_bucket(
-    request: PutObjectRequest | CopyObjectRequest,
+    request: PutObjectRequest | CopyObjectRequest | CreateMultipartUploadRequest,
     s3_bucket: S3Bucket,
     store: S3StoreV2,
-) -> tuple[ServerSideEncryption, SSEKMSKeyId, BucketKeyEnabled]:
+) -> EncryptionParameters:
     encryption = request.get("ServerSideEncryption")
     kms_key_id = request.get("SSEKMSKeyId")
     bucket_key_enabled = request.get("BucketKeyEnabled")
@@ -2050,4 +2051,4 @@ def get_encryption_parameters_from_request_and_bucket(
 
                 kms_key_id = store.aws_managed_kms_key_id
 
-    return encryption, kms_key_id, bucket_key_enabled
+    return EncryptionParameters(encryption, kms_key_id, bucket_key_enabled)
