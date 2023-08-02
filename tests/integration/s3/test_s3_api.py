@@ -432,6 +432,10 @@ class TestS3ObjectCRUD:
         # TODO: test with ListObject/ListObjectV2
 
 
+@pytest.mark.skipif(
+    condition=not config.NATIVE_S3_PROVIDER,
+    reason="These are WIP tests for the new native S3 provider",
+)
 class TestS3BucketVersioning:
     @markers.parity.aws_validated
     def test_bucket_versioning_crud(self, aws_client, s3_bucket, snapshot):
