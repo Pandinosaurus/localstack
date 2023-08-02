@@ -166,7 +166,7 @@ class S3EventNotificationContext:
         )
 
     @classmethod
-    def from_request_context_v2(
+    def from_request_context_native(
         cls,
         request_context: RequestContext,
         s3_bucket: S3Bucket,
