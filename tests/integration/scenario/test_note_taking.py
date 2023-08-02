@@ -103,7 +103,7 @@ class TestNoteTakingScenario:
     @pytest.fixture(scope="class")
     def create_archive_for_lambda_resource(self):
         libs_file = os.path.join(
-            os.path.dirname(__file__), "./notes_resources/lambda_sources/libs/response.js"
+            os.path.dirname(__file__), "./resources_note_taking/lambda_sources/libs/response.js"
         )
         tmp_dir_list = []
         tmp_zip_path_list = []
@@ -125,7 +125,7 @@ class TestNoteTakingScenario:
             # Add the lambda to the temporary directory
             lambda_file = f"{lambda_file_base_name}.js"
             lambda_file_path = os.path.join(
-                os.path.dirname(__file__), f"./notes_resources/lambda_sources/{lambda_file}"
+                os.path.dirname(__file__), f"./resources_note_taking/lambda_sources/{lambda_file}"
             )
             new_resource_temp_path = os.path.join(temp_dir, "index.js")
             shutil.copy2(lambda_file_path, new_resource_temp_path)
@@ -173,6 +173,7 @@ class TestNoteTakingScenario:
             stack,
             "notes",
             partition_key=dynamodb.Attribute(name="noteId", type=dynamodb.AttributeType.STRING),
+            removal_policy=cdk.RemovalPolicy.DESTROY,
         )
         api = apigw.RestApi(stack, "endpoint")
         notes_endpoint = api.root.add_resource("notes")
