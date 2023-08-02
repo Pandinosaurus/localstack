@@ -57,7 +57,11 @@ from localstack.aws.api.s3 import (
     WebsiteConfiguration,
     WebsiteRedirectLocation,
 )
-from localstack.services.s3.constants import S3_CHUNK_SIZE, S3_UPLOAD_PART_MIN_SIZE
+from localstack.services.s3.constants import (
+    DEFAULT_BUCKET_ENCRYPTION,
+    S3_CHUNK_SIZE,
+    S3_UPLOAD_PART_MIN_SIZE,
+)
 from localstack.services.s3.storage import LockedSpooledTemporaryFile
 from localstack.services.s3.utils import (
     ParsedRange,
@@ -70,6 +74,7 @@ from localstack.services.stores import (
     BaseStore,
     CrossAccountAttribute,
     CrossRegionAttribute,
+    LocalAttribute,
 )
 
 # TODO: beware of timestamp data, we need the snapshot to be more precise for S3, with the different types
@@ -95,9 +100,7 @@ class S3Bucket:
     logging: LoggingEnabled
     notification_configuration: NotificationConfiguration
     payer: Payer
-    encryption_rule: Optional[
-        ServerSideEncryptionRule
-    ]  # TODO validate if there can be more than one rule
+    encryption_rule: Optional[ServerSideEncryptionRule]
     public_access_block: PublicAccessBlockConfiguration
     accelerate_status: BucketAccelerateStatus
     object_ownership: ObjectOwnership
@@ -124,7 +127,7 @@ class S3Bucket:
         self.objects = KeyStore()
         self.object_ownership = object_ownership
         self.object_lock_enabled = object_lock_enabled_for_bucket
-        self.encryption_rule = None  # TODO
+        self.encryption_rule = DEFAULT_BUCKET_ENCRYPTION
         self.creation_date = datetime.utcnow()
         self.multiparts = {}
         self.versioning_status = None
@@ -258,7 +261,6 @@ class S3Object:
         self.checksum_algorithm = checksum_algorithm
         self.checksum_value = checksum_value
         self.encryption = encryption
-        # TODO: validate the format for kms_key_id, always store the ARN even if just the ID
         self.kms_key_id = kms_key_id
         self.bucket_key_enabled = bucket_key_enabled
         self.lock_mode = lock_mode
@@ -596,6 +598,7 @@ class VersionedKeyStore:
 class S3StoreV2(BaseStore):
     buckets: dict[BucketName, S3Bucket] = CrossRegionAttribute(default=dict)
     global_bucket_map: dict[BucketName, AccountId] = CrossAccountAttribute(default=dict)
+    aws_managed_kms_key_id: SSEKMSKeyId = LocalAttribute(default=str)
 
 
 class BucketCorsIndexV2:

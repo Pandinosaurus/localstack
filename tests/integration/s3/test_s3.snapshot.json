@@ -5800,7 +5800,7 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_sse_bucket_key_default": {
-    "recorded-date": "03-04-2023, 22:15:50",
+    "recorded-date": "02-08-2023, 00:24:58",
     "recorded-content": {
       "put-obj-default-before-setting": {
         "ETag": "\"42832cdec7083e70a9cd6f2d5852e004\"",
@@ -5863,7 +5863,7 @@
       },
       "put-obj-after-setting": {
         "BucketKeyEnabled": true,
-        "ETag": "\"da640409167cd01aaeb9ca47d4e20e5d\"",
+        "ETag": "\"716c92e3ab380233011ff029c53f020a\"",
         "SSEKMSKeyId": "arn:aws:kms:<region>:111111111111:key/<SSEKMSKeyId:1>",
         "ServerSideEncryption": "aws:kms",
         "ResponseMetadata": {
@@ -5877,7 +5877,7 @@
         "BucketKeyEnabled": true,
         "ContentLength": 8,
         "ContentType": "binary/octet-stream",
-        "ETag": "\"da640409167cd01aaeb9ca47d4e20e5d\"",
+        "ETag": "\"716c92e3ab380233011ff029c53f020a\"",
         "LastModified": "datetime",
         "Metadata": {},
         "SSEKMSKeyId": "arn:aws:kms:<region>:111111111111:key/<SSEKMSKeyId:1>",

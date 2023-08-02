@@ -39,8 +39,21 @@ class BaseStorageBackend(abc.ABC):
         raise NotImplementedError
 
     def get_key_fileobj(
-        self, bucket_name: BucketName, object_key: ObjectKey, version_id: ObjectVersionId = None
+        self,
+        bucket_name: BucketName,
+        object_key: ObjectKey,
+        version_id: ObjectVersionId = None,
+        in_place=False,
     ):
+        """
+        :param bucket_name
+        :param object_key
+        :param version_id
+        :param in_place: the in_place parameters allows for in place copies, where we want override an existing file
+        object at the same emplacement, but not return the previous fileobject (often opening both at the same time
+        to read one into the other)
+        :return:
+        """
         raise NotImplementedError
 
     def delete_key_fileobj(
@@ -142,10 +155,16 @@ class TemporaryStorageBackend(BaseStorageBackend):
             rmtree(tmp_dir, ignore_errors=True)
 
     def get_key_fileobj(
-        self, bucket_name: BucketName, object_key: ObjectKey, version_id: ObjectVersionId = None
+        self,
+        bucket_name: BucketName,
+        object_key: ObjectKey,
+        version_id: ObjectVersionId = None,
+        in_place=False,
     ) -> "LockedSpooledTemporaryFile":
         key = self._get_fileobj_key(object_key, version_id)
-        if not (fileobj := self._filesystem.get(bucket_name, {}).get("keys", {}).get(key)):
+        if in_place or not (
+            fileobj := self._filesystem.get(bucket_name, {}).get("keys", {}).get(key)
+        ):
             # if, for some race condition, bucket_tmp_dir is None, the SpooledFile will be in the default tmp dir
             # which is fine
             bucket_tmp_dir = self._directory_mapping.get(bucket_name)
