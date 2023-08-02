@@ -1514,7 +1514,6 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         request_id_element.text = request_id
 
         header_params, payload_params = self._partition_error_members(error, shape)
-        print(header_params, payload_params)
         self._add_additional_error_tags_from_parameters(payload_params, root, shape, mime_type)
         self._process_header_members(header_params, response, shape)
 
