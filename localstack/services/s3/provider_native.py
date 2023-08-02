@@ -2,6 +2,7 @@ import base64
 import datetime
 import hashlib
 import logging
+from io import BytesIO
 from secrets import token_urlsafe
 from typing import IO, Optional
 
@@ -14,6 +15,7 @@ from localstack.aws.api.s3 import (
     Bucket,
     BucketAlreadyExists,
     BucketAlreadyOwnedByYou,
+    BucketKeyEnabled,
     BucketName,
     BucketNotEmpty,
     BypassGovernanceRetention,
@@ -44,6 +46,7 @@ from localstack.aws.api.s3 import (
     Error,
     ETag,
     FetchOwner,
+    GetBucketEncryptionOutput,
     GetBucketLocationOutput,
     GetBucketVersioningOutput,
     GetObjectAttributesOutput,
@@ -92,9 +95,11 @@ from localstack.aws.api.s3 import (
     RestoreRequest,
     S3Api,
     ServerSideEncryption,
+    ServerSideEncryptionConfiguration,
     SSECustomerAlgorithm,
     SSECustomerKey,
     SSECustomerKeyMD5,
+    SSEKMSKeyId,
     StartAfter,
     StorageClass,
     Token,
@@ -128,9 +133,11 @@ from localstack.services.s3.models_native import (
 from localstack.services.s3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
 from localstack.services.s3.utils import (
     add_expiration_days_to_datetime,
+    create_s3_kms_managed_key_for_region,
     extract_bucket_key_version_id_from_copy_source,
     get_class_attrs_from_spec_class,
     get_full_default_bucket_location,
+    get_kms_key_arn,
     get_owner_for_account_id,
     get_s3_checksum,
     get_system_metadata_from_request,
@@ -143,6 +150,7 @@ from localstack.utils.strings import to_str
 LOG = logging.getLogger(__name__)
 
 STORAGE_CLASSES = get_class_attrs_from_spec_class(StorageClass)
+SSE_ALGORITHMS = get_class_attrs_from_spec_class(ServerSideEncryption)
 
 # TODO: pre-signed URLS -> REMAP parameters from querystring to headers???
 #  create a handler which handle pre-signed and remap before parsing the request!
@@ -362,6 +370,16 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 f"Value for x-amz-checksum-{checksum_algorithm.lower()} header is invalid."
             )
 
+        (
+            encryption,
+            kms_key_id,
+            bucket_key_enabled,
+        ) = get_encryption_parameters_from_request_and_bucket(
+            request,
+            s3_bucket,
+            store,
+        )
+
         s3_object = S3Object(
             key=key,
             version_id=version_id,
@@ -373,9 +391,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             system_metadata=system_metadata,
             checksum_algorithm=checksum_algorithm,
             checksum_value=checksum_value,
-            encryption=request.get("ServerSideEncryption"),
-            kms_key_id=request.get("SSEKMSKeyId"),
-            bucket_key_enabled=request.get("BucketKeyEnabled"),
+            encryption=encryption,
+            kms_key_id=kms_key_id,
+            bucket_key_enabled=bucket_key_enabled,
             lock_mode=request.get("ObjectLockMode"),
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
@@ -482,6 +500,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         else:
             response["Body"] = fileobj.get_locked_stream_iterator()
 
+        add_encryption_to_response(response, s3_object=s3_object)
+
         # TODO: missing returned fields
         #     Expiration: Optional[Expiration]
         #     Restore: Optional[Restore]
@@ -544,6 +564,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if s3_object.website_redirect_location:
             response["WebsiteRedirectLocation"] = s3_object.website_redirect_location
+
+        add_encryption_to_response(response, s3_object=s3_object)
 
         # TODO: missing return fields:
         # Expiration: Optional[Expiration]
@@ -744,9 +766,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # copy_source_if_unmodified_since: CopySourceIfUnmodifiedSince = None,
         #
         # tagging_directive: TaggingDirective = None,
-        # server_side_encryption: ServerSideEncryption = None,
-        # ssekms_key_id: SSEKMSKeyId = None,
-        # bucket_key_enabled: BucketKeyEnabled = None,
         #
         # request_payer: RequestPayer = None,
         # tagging: TaggingHeader = None,
@@ -815,11 +834,18 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             bucket_name=dest_bucket,
             object_key=dest_key,
             version_id=dest_version_id,
+            in_place=True,
         )
 
         _, _, calculated_checksum_value = read_from_fileobj_into_fileobj(
             src_fileobj, dest_fileobj, checksum_algorithm
         )
+
+        (
+            encryption,
+            kms_key_id,
+            bucket_key_enabled,
+        ) = get_encryption_parameters_from_request_and_bucket(request, dest_s3_bucket)
 
         s3_object = S3Object(
             key=dest_key,
@@ -831,9 +857,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             system_metadata=system_metadata,
             checksum_algorithm=request.get("ChecksumAlgorithm") or src_s3_object.checksum_algorithm,
             checksum_value=calculated_checksum_value or src_s3_object.checksum_value,
-            encryption=request.get("ServerSideEncryption"),  # TODO inherit from bucket
-            kms_key_id=request.get("SSEKMSKeyId"),
-            bucket_key_enabled=request.get("BucketKeyEnabled"),
+            encryption=encryption,
+            kms_key_id=kms_key_id,
+            bucket_key_enabled=bucket_key_enabled,
             lock_mode=request.get("ObjectLockMode"),
             lock_legal_status=request.get("ObjectLockLegalHoldStatus"),
             lock_until=request.get("ObjectLockRetainUntilDate"),
@@ -1834,12 +1860,80 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         return GetBucketVersioningOutput(Status=s3_bucket.versioning_status)
 
+    def get_bucket_encryption(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> GetBucketEncryptionOutput:
+        # AWS now encrypts bucket by default with AES256, see:
+        # https://docs.aws.amazon.com/AmazonS3/latest/userguide/default-bucket-encryption.html
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if not s3_bucket.encryption_rule:
+            return GetBucketEncryptionOutput()
+
+        return GetBucketEncryptionOutput(
+            ServerSideEncryptionConfiguration={"Rules": [s3_bucket.encryption_rule]}
+        )
+
+    def put_bucket_encryption(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        server_side_encryption_configuration: ServerSideEncryptionConfiguration,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if not (rules := server_side_encryption_configuration.get("Rules")):
+            raise MalformedXML()
+
+        if len(rules) != 1 or not (
+            encryption := rules[0].get("ApplyServerSideEncryptionByDefault")
+        ):
+            raise MalformedXML()
+
+        if not (sse_algorithm := encryption.get("SSEAlgorithm")):
+            raise MalformedXML()
+
+        if sse_algorithm not in SSE_ALGORITHMS:
+            raise MalformedXML()
+
+        if sse_algorithm != ServerSideEncryption.aws_kms and "KMSMasterKeyID" in encryption:
+            raise InvalidArgument(
+                "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms",
+                ArgumentName="ApplyServerSideEncryptionByDefault",
+            )
+        # elif master_kms_key := encryption.get("KMSMasterKeyID"):
+        # TODO: validate KMS key? not currently done in moto
+        # You can pass either the KeyId or the KeyArn. If cross-account, it has to be the ARN.
+        # It's always saved as the ARN in the bucket configuration.
+        # kms_key_arn = get_kms_key_arn(master_kms_key, s3_bucket.bucket_account_id)
+        # encryption["KMSMasterKeyID"] = master_kms_key
+
+        s3_bucket.encryption_rule = rules[0]
+
+    def delete_bucket_encryption(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        s3_bucket.encryption_rule = None
+
 
 def readinto_fileobj(
-    value: IO[bytes] | PartialStream,
+    value: IO[bytes] | PartialStream | None,
     buffer: LockedSpooledTemporaryFile,
     checksum_algorithm: Optional[ChecksumAlgorithm] = None,
 ) -> tuple[ObjectSize, ETag, Optional[str]]:
+    if value is None:
+        value = BytesIO()
     with buffer.write_lock:
         buffer.seek(0)
         buffer.truncate()
@@ -1921,8 +2015,39 @@ def add_encryption_to_response(response: dict, s3_object: S3Object):
     if encryption := s3_object.encryption:
         response["ServerSideEncryption"] = encryption
         if encryption == ServerSideEncryption.aws_kms:
-            if s3_object.kms_key_id is not None:
-                # TODO: see S3 AWS managed KMS key if not provided
-                response["SSEKMSKeyId"] = s3_object.kms_key_id
+            response["SSEKMSKeyId"] = s3_object.kms_key_id
             if s3_object.bucket_key_enabled is not None:
                 response["BucketKeyEnabled"] = s3_object.bucket_key_enabled
+
+
+def get_encryption_parameters_from_request_and_bucket(
+    request: PutObjectRequest | CopyObjectRequest,
+    s3_bucket: S3Bucket,
+    store: S3StoreV2,
+) -> tuple[ServerSideEncryption, SSEKMSKeyId, BucketKeyEnabled]:
+    encryption = request.get("ServerSideEncryption")
+    kms_key_id = request.get("SSEKMSKeyId")
+    bucket_key_enabled = request.get("BucketKeyEnabled")
+    if s3_bucket.encryption_rule:
+        bucket_key_enabled = bucket_key_enabled or s3_bucket.encryption_rule.get("BucketKeyEnabled")
+        encryption = (
+            encryption
+            or s3_bucket.encryption_rule["ApplyServerSideEncryptionByDefault"]["SSEAlgorithm"]
+        )
+        if encryption == ServerSideEncryption.aws_kms:
+            key_id = kms_key_id or s3_bucket.encryption_rule[
+                "ApplyServerSideEncryptionByDefault"
+            ].get("KMSMasterKeyID")
+            kms_key_id = get_kms_key_arn(key_id, s3_bucket.bucket_account_id)
+            if not kms_key_id:
+                # if not key is provided, AWS will use an AWS managed KMS key
+                # create it if it doesn't already exist, and save it in the store per region
+                if not store.aws_managed_kms_key_id:
+                    managed_kms_key_id = create_s3_kms_managed_key_for_region(
+                        s3_bucket.bucket_region
+                    )
+                    store.aws_managed_kms_key_id = managed_kms_key_id
+
+                kms_key_id = store.aws_managed_kms_key_id
+
+    return encryption, kms_key_id, bucket_key_enabled

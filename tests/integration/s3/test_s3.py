@@ -4551,9 +4551,9 @@ class TestS3:
         snapshot.match("get-obj", response)
 
     @markers.parity.aws_validated
-    @pytest.mark.skip(
-        reason="Behaviour not implemented yet: https://github.com/localstack/localstack/issues/6882"
-    )
+    # @pytest.mark.skip(
+    #     reason="Behaviour not implemented yet: https://github.com/localstack/localstack/issues/6882"
+    # )
     # there is currently no server side encryption is place in LS, ETag will be different
     @markers.snapshot.skip_snapshot_verify(paths=["$..ETag"])
     @markers.snapshot.skip_snapshot_verify(
