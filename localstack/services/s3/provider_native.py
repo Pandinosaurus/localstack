@@ -41,6 +41,7 @@ from localstack.aws.api.s3 import (
     DeleteMarkerEntry,
     DeleteObjectOutput,
     DeleteObjectsOutput,
+    DeleteObjectTaggingOutput,
     Delimiter,
     EncodingType,
     Error,
@@ -48,12 +49,14 @@ from localstack.aws.api.s3 import (
     FetchOwner,
     GetBucketEncryptionOutput,
     GetBucketLocationOutput,
+    GetBucketTaggingOutput,
     GetBucketVersioningOutput,
     GetObjectAttributesOutput,
     GetObjectAttributesParts,
     GetObjectAttributesRequest,
     GetObjectOutput,
     GetObjectRequest,
+    GetObjectTaggingOutput,
     HeadBucketOutput,
     HeadObjectOutput,
     HeadObjectRequest,
@@ -76,6 +79,8 @@ from localstack.aws.api.s3 import (
     MultipartUpload,
     MultipartUploadId,
     NoSuchBucket,
+    NoSuchKey,
+    NoSuchTagSet,
     NoSuchUpload,
     NotificationConfiguration,
     Object,
@@ -91,6 +96,7 @@ from localstack.aws.api.s3 import (
     Prefix,
     PutObjectOutput,
     PutObjectRequest,
+    PutObjectTaggingOutput,
     RequestPayer,
     RestoreObjectOutput,
     RestoreRequest,
@@ -103,6 +109,7 @@ from localstack.aws.api.s3 import (
     SSECustomerKeyMD5,
     StartAfter,
     StorageClass,
+    Tagging,
     Token,
     UploadIdMarker,
     UploadPartCopyOutput,
@@ -144,9 +151,12 @@ from localstack.services.s3.utils import (
     get_owner_for_account_id,
     get_s3_checksum,
     get_system_metadata_from_request,
+    get_unique_key_id,
     is_bucket_name_valid,
     parse_range_header,
+    parse_tagging_header,
     validate_kms_key_id,
+    validate_tag_set,
 )
 from localstack.utils.strings import to_str
 
@@ -352,7 +362,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         #  grant_write_acp: GrantWriteACP = None,
         #  -
         #  request_payer: RequestPayer = None,
-        #  tagging: TaggingHeader = None,
         #  object_lock_mode: ObjectLockMode = None,
         #  object_lock_retain_until_date: ObjectLockRetainUntilDate = None,
         #  object_lock_legal_hold_status: ObjectLockLegalHoldStatus = None,
@@ -444,7 +453,12 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         s3_bucket.objects.set(key, s3_object)
 
-        # TODO: tags: do we have tagging service or do we manually handle? see utils TaggingService
+        # in case we are overriding an object, delete the tags entry
+        key_id = get_unique_key_id(bucket_name, key, version_id)
+        store.TAGS.tags.pop(key_id, None)
+        if tagging_header := request.get("Tagging"):
+            tagging = parse_tagging_header(tagging_header)
+            store.TAGS.tags[key_id] = tagging
 
         # TODO: returned fields
         # RequestCharged: Optional[RequestCharged]  # TODO
@@ -546,11 +560,15 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         add_encryption_to_response(response, s3_object=s3_object)
 
+        if object_tags := store.TAGS.tags.get(
+            get_unique_key_id(bucket_name, object_key, version_id)
+        ):
+            response["TagCount"] = len(object_tags)
+
         # TODO: missing returned fields
         #     Expiration: Optional[Expiration]
         #     RequestCharged: Optional[RequestCharged]
         #     ReplicationStatus: Optional[ReplicationStatus]
-        #     TagCount: Optional[TagCount]
         #     ObjectLockMode: Optional[ObjectLockMode]
         #     ObjectLockRetainUntilDate: Optional[ObjectLockRetainUntilDate]
         #     ObjectLockLegalHoldStatus: Optional[ObjectLockLegalHoldStatus]
@@ -654,6 +672,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             if found_object:
                 self._storage_backend.delete_key_fileobj(bucket_name=bucket, object_key=key)
                 self._notify(context, s3_bucket=s3_bucket, s3_object=found_object)
+                store.TAGS.tags.pop(get_unique_key_id(bucket, key, version_id), None)
+
             return DeleteObjectOutput()
 
         if not version_id:
@@ -688,6 +708,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 bucket_name=bucket, object_key=key, version_id=version_id
             )
         self._notify(context, s3_bucket=s3_bucket, s3_object=found_object)
+        store.TAGS.tags.pop(get_unique_key_id(bucket, key, version_id), None)
 
         return response
 
@@ -740,6 +761,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                         bucket_name=bucket, object_key=object_key
                     )
                     self._notify(context, s3_bucket=s3_bucket, s3_object=found_object)
+                    store.TAGS.tags.pop(get_unique_key_id(bucket, object_key, version_id), None)
                 # small hack to not create a fake object for nothing
                 elif s3_bucket.notification_configuration:
                     # DeleteObjects is a bit weird, even if the object didn't exist, S3 will trigger a notification
@@ -799,6 +821,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 )
 
             self._notify(context, s3_bucket=s3_bucket, s3_object=found_object)
+            store.TAGS.tags.pop(get_unique_key_id(bucket, object_key, version_id), None)
 
         # TODO: request charged
         response: DeleteObjectsOutput = {}
@@ -828,10 +851,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # copy_source_if_none_match: CopySourceIfNoneMatch = None,
         # copy_source_if_unmodified_since: CopySourceIfUnmodifiedSince = None,
         #
-        # tagging_directive: TaggingDirective = None,
-        #
         # request_payer: RequestPayer = None,
-        # tagging: TaggingHeader = None,
         # object_lock_mode: ObjectLockMode = None,
         # object_lock_retain_until_date: ObjectLockRetainUntilDate = None,
         # object_lock_legal_hold_status: ObjectLockLegalHoldStatus = None,
@@ -876,6 +896,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
                 "object's metadata, storage class, website redirect location or encryption attributes."
             )
 
+        if tagging := request.get("Tagging"):
+            tagging = parse_tagging_header(tagging)
+
         if metadata_directive == "REPLACE":
             user_metadata = request.get("Metadata")
             system_metadata = get_system_metadata_from_request(request)
@@ -897,7 +920,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             bucket_name=dest_bucket,
             object_key=dest_key,
             version_id=dest_version_id,
-            in_place=True,
+            in_place=src_key == dest_key,
         )
 
         _, _, calculated_checksum_value = read_from_fileobj_into_fileobj(
@@ -933,6 +956,13 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # Object copied from Glacier object should not have expiry
         # TODO: verify this assumption from moto?
         dest_s3_bucket.objects.set(dest_key, s3_object)
+
+        dest_key_id = get_unique_key_id(dest_bucket, dest_key, dest_version_id)
+        if (request.get("TaggingDirective")) == "REPLACE":
+            store.TAGS.tags[dest_key_id] = tagging
+        else:
+            src_key_id = get_unique_key_id(src_bucket, src_key, src_version_id)
+            store.TAGS.tags[dest_key_id] = copy.copy(store.TAGS.tags.get(src_key_id, {}))
 
         copy_object_result = CopyObjectResult(
             ETag=s3_object.quoted_etag,
@@ -1409,7 +1439,6 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         #  grant_read_acp: GrantReadACP = None,
         #  grant_write_acp: GrantWriteACP = None,
         #  request_payer: RequestPayer = None,
-        #  tagging: TaggingHeader = None,
         store = self.get_store(context.account_id, context.region)
         bucket_name = request["Bucket"]
         if not (s3_bucket := store.buckets.get(bucket_name)):
@@ -1424,6 +1453,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
 
         if not config.S3_SKIP_KMS_KEY_VALIDATION and (sse_kms_key_id := request.get("SSEKMSKeyId")):
             validate_kms_key_id(sse_kms_key_id, s3_bucket)
+
+        if tagging := request.get("Tagging"):
+            tagging = parse_tagging_header(tagging_header=tagging)
 
         key = request["Key"]
 
@@ -1463,15 +1495,13 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             expiration=None,  # TODO, from lifecycle, or should it be updated with config?
             acl=None,
             initiator=get_owner_for_account_id(context.account_id),
+            tagging=tagging,
         )
 
         s3_bucket.multiparts[s3_multipart.id] = s3_multipart
         self._storage_backend.create_upload_directory(
             bucket_name=bucket_name, upload_id=s3_multipart.id
         )
-
-        # TODO: tags: do we have tagging service or do we manually handle? see utils TaggingService
-        #  add to store
 
         response = CreateMultipartUploadOutput(
             Bucket=bucket_name, Key=key, UploadId=s3_multipart.id
@@ -1733,6 +1763,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         # remove the multipart now that it's complete
         self._storage_backend.delete_upload_directory(bucket, s3_multipart.id)
         s3_bucket.multiparts.pop(s3_multipart.id, None)
+
+        key_id = get_unique_key_id(bucket, key, version_id)
+        store.TAGS.tags.pop(key_id, None)
+        if s3_multipart.tagging:
+            store.TAGS.tags[key_id] = s3_multipart.tagging
 
         # TODO: validate if you provide wrong checksum compared to the given algorithm? should you calculate it anyway
         #  when you complete? sounds weird, not sure how that works?
@@ -2038,6 +2073,148 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
 
         return s3_bucket.notification_configuration or NotificationConfiguration()
+
+    def put_bucket_tagging(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        tagging: Tagging,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if "TagSet" not in tagging:
+            raise MalformedXML()
+
+        validate_tag_set(tagging["TagSet"], type_set="bucket")
+
+        # remove the previous tags before setting the new ones, it overwrites the whole TagSet
+        store.TAGS.tags.pop(s3_bucket.bucket_arn, None)
+        store.TAGS.tag_resource(s3_bucket.bucket_arn, tags=tagging["TagSet"])
+
+    def get_bucket_tagging(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> GetBucketTaggingOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+        tag_set = store.TAGS.list_tags_for_resource(s3_bucket.bucket_arn, root_name="Tags")["Tags"]
+        if not tag_set:
+            raise NoSuchTagSet(
+                "The TagSet does not exist",
+                BucketName=bucket,
+            )
+
+        return GetBucketTaggingOutput(TagSet=tag_set)
+
+    def delete_bucket_tagging(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        store.TAGS.tags.pop(s3_bucket.bucket_arn, None)
+
+    def put_object_tagging(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        key: ObjectKey,
+        tagging: Tagging,
+        version_id: ObjectVersionId = None,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        expected_bucket_owner: AccountId = None,
+        request_payer: RequestPayer = None,
+    ) -> PutObjectTaggingOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        s3_object = s3_bucket.get_object(
+            key=key,
+            version_id=version_id,
+            raise_for_delete_marker=False,  # We can tag DeleteMarker
+        )
+
+        if "TagSet" not in tagging:
+            raise MalformedXML()
+
+        validate_tag_set(tagging["TagSet"], type_set="object")
+
+        key_id = get_unique_key_id(bucket, key, version_id)
+        # remove the previous tags before setting the new ones, it overwrites the whole TagSet
+        store.TAGS.tags.pop(key_id, None)
+        store.TAGS.tag_resource(key_id, tags=tagging["TagSet"])
+        response = PutObjectTaggingOutput()
+        if s3_object.version_id:
+            response["VersionId"] = s3_object.version_id
+
+        return response
+
+    def get_object_tagging(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        key: ObjectKey,
+        version_id: ObjectVersionId = None,
+        expected_bucket_owner: AccountId = None,
+        request_payer: RequestPayer = None,
+    ) -> GetObjectTaggingOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        try:
+            s3_object = s3_bucket.get_object(
+                key=key,
+                version_id=version_id,
+                raise_for_delete_marker=False,  # We can tag DeleteMarker
+            )
+        except NoSuchKey as e:
+            # There a weird AWS validated bug in S3: the returned key contains the bucket name as well
+            # follow AWS on this one
+            e.Key = f"{bucket}/{key}"
+            raise e
+
+        tag_set = store.TAGS.list_tags_for_resource(get_unique_key_id(bucket, key, version_id))[
+            "Tags"
+        ]
+        response = GetObjectTaggingOutput(TagSet=tag_set)
+        if s3_object.version_id:
+            response["VersionId"] = s3_object.version_id
+
+        return response
+
+    def delete_object_tagging(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        key: ObjectKey,
+        version_id: ObjectVersionId = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> DeleteObjectTaggingOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        s3_object = s3_bucket.get_object(
+            key=key,
+            version_id=version_id,
+            raise_for_delete_marker=False,
+        )
+
+        store.TAGS.tags.pop(get_unique_key_id(bucket, key, version_id), None)
+        response = DeleteObjectTaggingOutput()
+        if s3_object.version_id:
+            response["VersionId"] = s3_object.version_id
+
+        return response
 
 
 def readinto_fileobj(

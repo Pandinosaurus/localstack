@@ -8831,5 +8831,149 @@
         }
       }
     }
+  },
+  "tests/integration/s3/test_s3.py::TestS3::test_s3_copy_tagging_directive[COPY]": {
+    "recorded-date": "03-08-2023, 01:40:54",
+    "recorded-content": {
+      "put-object": {
+        "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key1",
+            "Value": "value1"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "copy-object": {
+        "CopyObjectResult": {
+          "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+          "LastModified": "datetime"
+        },
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-copy-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key1",
+            "Value": "value1"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/integration/s3/test_s3.py::TestS3::test_s3_copy_tagging_directive[REPLACE]": {
+    "recorded-date": "03-08-2023, 01:40:57",
+    "recorded-content": {
+      "put-object": {
+        "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key1",
+            "Value": "value1"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "copy-object": {
+        "CopyObjectResult": {
+          "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+          "LastModified": "datetime"
+        },
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-copy-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key2",
+            "Value": "value2"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
+  },
+  "tests/integration/s3/test_s3.py::TestS3::test_s3_copy_tagging_directive[None]": {
+    "recorded-date": "03-08-2023, 01:40:59",
+    "recorded-content": {
+      "put-object": {
+        "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key1",
+            "Value": "value1"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "copy-object": {
+        "CopyObjectResult": {
+          "ETag": "\"098f6bcd4621d373cade4e832627b4f6\"",
+          "LastModified": "datetime"
+        },
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-copy-object-tag": {
+        "TagSet": [
+          {
+            "Key": "key1",
+            "Value": "value1"
+          }
+        ],
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   }
 }
