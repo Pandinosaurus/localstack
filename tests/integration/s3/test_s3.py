@@ -4555,6 +4555,9 @@ class TestS3:
     # there is currently no server side encryption is place in LS, ETag will be different
     @markers.snapshot.skip_snapshot_verify(paths=["$..ETag"])
     @markers.snapshot.skip_snapshot_verify(
+        condition=lambda: not is_native_provider(), paths=["$..ServerSideEncryption"]
+    )
+    @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider,
         paths=["$..ContentLanguage", "$..SSEKMSKeyId", "$..VersionId", "$..KMSMasterKeyID"],
     )
