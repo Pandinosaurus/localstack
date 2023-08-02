@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from io import RawIOBase
 from secrets import token_urlsafe
-from typing import IO, Literal, Optional, Union
+from typing import IO, Literal, NamedTuple, Optional, Union
 
 from werkzeug.datastructures.headers import Headers
 
@@ -14,6 +14,7 @@ from localstack.aws.api.s3 import (
     AnalyticsConfiguration,
     AnalyticsId,
     BucketAccelerateStatus,
+    BucketKeyEnabled,
     BucketName,
     BucketRegion,
     BucketVersioningStatus,
@@ -669,6 +670,12 @@ class PartialStream(RawIOBase):
 
     def readable(self) -> bool:
         return True
+
+
+class EncryptionParameters(NamedTuple):
+    encryption: ServerSideEncryption
+    kms_key_id: SSEKMSKeyId
+    bucket_key_enabled: BucketKeyEnabled
 
 
 s3_stores_v2 = AccountRegionBundle[S3StoreV2]("s3", S3StoreV2)

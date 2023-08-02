@@ -5744,7 +5744,7 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_multipart_upload_sse": {
-    "recorded-date": "03-04-2023, 22:15:25",
+    "recorded-date": "02-08-2023, 02:34:24",
     "recorded-content": {
       "multi-sse-create-multipart": {
         "Bucket": "<bucket>",
@@ -5760,7 +5760,7 @@
       },
       "multi-sse-upload-part": {
         "BucketKeyEnabled": true,
-        "ETag": "\"366ca6af9c03448ebf507675d7a27ecd\"",
+        "ETag": "\"1fbe64b222c06756878d0bf7daa66af1\"",
         "SSEKMSKeyId": "arn:aws:kms:<region>:111111111111:key/<SSEKMSKeyId:1>",
         "ServerSideEncryption": "aws:kms",
         "ResponseMetadata": {
@@ -5771,7 +5771,7 @@
       "multi-sse-compete-multipart": {
         "Bucket": "<bucket>",
         "BucketKeyEnabled": true,
-        "ETag": "\"ff65e9b5cbf8e4e5e26d7f39dc4418b1-1\"",
+        "ETag": "\"3375489783c5063262df2f2477339baa-1\"",
         "Key": "test-sse-field-multipart",
         "Location": "<location:1>",
         "SSEKMSKeyId": "arn:aws:kms:<region>:111111111111:key/<SSEKMSKeyId:1>",
@@ -5787,7 +5787,7 @@
         "BucketKeyEnabled": true,
         "ContentLength": 8,
         "ContentType": "binary/octet-stream",
-        "ETag": "\"ff65e9b5cbf8e4e5e26d7f39dc4418b1-1\"",
+        "ETag": "\"3375489783c5063262df2f2477339baa-1\"",
         "LastModified": "datetime",
         "Metadata": {},
         "SSEKMSKeyId": "arn:aws:kms:<region>:111111111111:key/<SSEKMSKeyId:1>",
