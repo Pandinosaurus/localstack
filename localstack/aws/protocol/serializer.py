@@ -1514,6 +1514,7 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         request_id_element.text = request_id
 
         header_params, payload_params = self._partition_error_members(error, shape)
+        print(header_params, payload_params)
         self._add_additional_error_tags_from_parameters(payload_params, root, shape, mime_type)
         self._process_header_members(header_params, response, shape)
 
@@ -1598,9 +1599,8 @@ class S3ResponseSerializer(RestXMLResponseSerializer):
         shape_members = shape.members
         for name in shape_members:
             member_shape = shape_members[name]
-            if name.lower() not in ["code", "message"] and (
-                error_param := getattr(error, name, None)
-            ):
+            if name.lower() not in ["code", "message"] and hasattr(error, name):
+                error_param = getattr(error, name)
                 location = member_shape.serialization.get("location")
                 if location:
                     header_params[name] = error_param
