@@ -2155,6 +2155,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         if s3_object.version_id:
             response["VersionId"] = s3_object.version_id
 
+        self._notify(context, s3_bucket=s3_bucket, s3_object=s3_object)
+
         return response
 
     def get_object_tagging(
@@ -2213,6 +2215,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         response = DeleteObjectTaggingOutput()
         if s3_object.version_id:
             response["VersionId"] = s3_object.version_id
+
+        self._notify(context, s3_bucket=s3_bucket, s3_object=s3_object)
 
         return response
 
