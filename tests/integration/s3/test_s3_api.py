@@ -684,6 +684,10 @@ class TestS3BucketEncryption:
         snapshot.match("get-object-encrypted", get_object_encrypted)
 
 
+@pytest.mark.skipif(
+    condition=not config.NATIVE_S3_PROVIDER,
+    reason="These are WIP tests for the new native S3 provider",
+)
 class TestS3BucketObjectTagging:
     @markers.parity.aws_validated
     def test_bucket_tagging_crud(self, s3_bucket, aws_client, snapshot):
