@@ -2324,7 +2324,7 @@ def readinto_fileobj(
 ) -> tuple[ObjectSize, ETag, Optional[str]]:
     if value is None:
         value = BytesIO()
-    with buffer.write_lock:
+    with buffer.readwrite_lock.gen_wlock():
         buffer.seek(0)
         buffer.truncate()
         # We have 2 cases:
@@ -2357,7 +2357,7 @@ def read_from_fileobj_into_fileobj(
     dest_fileobj: LockedSpooledTemporaryFile,
     checksum_algorithm: Optional[ChecksumAlgorithm] = None,
 ) -> tuple[ObjectSize, ETag, Optional[str]]:
-    with dest_fileobj.write_lock, src_fileobj.read_lock:
+    with dest_fileobj.readwrite_lock.gen_wlock(), src_fileobj.readwrite_lock.gen_rlock():
         dest_fileobj.seek(0)
         dest_fileobj.truncate()
         # We have 2 cases:
