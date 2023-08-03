@@ -37,6 +37,7 @@ class GenericBaseModel:
 
     def __init__(self, resource_json: dict, region_name: Optional[str] = None, **params):
         # self.stack_name = stack_name # TODO: add stack name to params
+        # TODO@viren
         self.region_name = region_name or aws_stack.get_region()
         self.resource_json = resource_json
         self.resource_type = resource_json["Type"]

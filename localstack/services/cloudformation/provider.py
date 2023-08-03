@@ -196,6 +196,8 @@ class CloudformationProvider(CloudformationApi):
         new_parameters = param_resolver.convert_stack_parameters_to_dict(request.get("Parameters"))
         parameter_declarations = param_resolver.extract_stack_parameter_declarations(template)
         resolved_parameters = param_resolver.resolve_parameters(
+            account_id=context.account_id,
+            region_name=context.region,
             parameter_declarations=parameter_declarations,
             new_parameters=new_parameters,
             old_parameters={},
@@ -296,6 +298,8 @@ class CloudformationProvider(CloudformationApi):
         )
         parameter_declarations = param_resolver.extract_stack_parameter_declarations(template)
         resolved_parameters = param_resolver.resolve_parameters(
+            account_id=context.account_id,
+            region_name=context.region,
             parameter_declarations=parameter_declarations,
             new_parameters=new_parameters,
             old_parameters=stack.resolved_parameters,
@@ -548,6 +552,8 @@ class CloudformationProvider(CloudformationApi):
         )
         parameter_declarations = param_resolver.extract_stack_parameter_declarations(template)
         resolved_parameters = param_resolver.resolve_parameters(
+            account_id=context.account_id,
+            region_name=context.region,
             parameter_declarations=parameter_declarations,
             new_parameters=new_parameters,
             old_parameters=old_parameters,
@@ -966,8 +972,13 @@ class CloudformationProvider(CloudformationApi):
         for account in accounts:
             for region in regions:
                 # deploy new stack
-                LOG.debug('Deploying instance for stack set "%s" in region "%s"', set_name, region)
-                cf_client = connect_to(region_name=region).cloudformation
+                LOG.debug(
+                    'Deploying instance for stack set "%s" in account: %s region %s',
+                    set_name,
+                    account,
+                    region,
+                )
+                cf_client = connect_to(aws_access_key_id=account, region_name=region).cloudformation
                 kwargs = select_attributes(sset_meta, ["TemplateBody"]) or select_attributes(
                     sset_meta, ["TemplateURL"]
                 )
@@ -978,7 +989,7 @@ class CloudformationProvider(CloudformationApi):
                     continue
 
                 result = cf_client.create_stack(StackName=stack_name, **kwargs)
-                stacks_to_await.append((stack_name, region))
+                stacks_to_await.append((stack_name, account, region))
                 # store stack instance
                 instance = {
                     "StackSetId": sset_meta["StackSetId"],
@@ -993,9 +1004,11 @@ class CloudformationProvider(CloudformationApi):
                 stack_set.stack_instances.append(instance)
 
         # wait for completion of stack
-        for stack in stacks_to_await:
-            client = connect_to(region_name=stack[1]).cloudformation
-            client.get_waiter("stack_create_complete").wait(StackName=stack[0])
+        for stack_name, account_id, region_name in stacks_to_await:
+            client = connect_to(
+                aws_access_key_id=account_id, region_name=region_name
+            ).cloudformation
+            client.get_waiter("stack_create_complete").wait(StackName=stack_name)
 
         # record operation
         operation = {

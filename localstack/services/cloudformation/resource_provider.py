@@ -206,6 +206,7 @@ def invoke_function(
         LOG.debug(
             'Request for resource type "%s" in region %s: %s %s',
             resource_type,
+            # TODO@viren
             aws_stack.get_region(),
             func_details["function"],
             params,
