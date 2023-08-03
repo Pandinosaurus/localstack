@@ -7007,7 +7007,7 @@ class TestS3PresignedUrl:
 
 
 @pytest.mark.skipif(
-    condition=is_asf_provider(),
+    condition=lambda: not is_old_provider(),
     reason="ASF provider is tested in test_s3_cors.py, this will be deprecated",
 )
 class TestS3Cors:
