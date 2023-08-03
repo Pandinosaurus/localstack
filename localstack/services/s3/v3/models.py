@@ -215,6 +215,7 @@ class S3Bucket:
 class S3Object:
     key: ObjectKey
     version_id: Optional[ObjectVersionId]
+    bucket: BucketName
     size: Size
     etag: ETag
     user_metadata: Metadata
@@ -608,7 +609,7 @@ class VersionedKeyStore:
         return item in self._store
 
 
-class S3StoreNative(BaseStore):
+class S3Store(BaseStore):
     buckets: dict[BucketName, S3Bucket] = CrossRegionAttribute(default=dict)
     global_bucket_map: dict[BucketName, AccountId] = CrossAccountAttribute(default=dict)
     aws_managed_kms_key_id: SSEKMSKeyId = LocalAttribute(default=str)
@@ -642,7 +643,7 @@ class BucketCorsIndexNative:
     def _build_index() -> tuple[set[BucketName], dict[BucketName, CORSConfiguration]]:
         buckets = set()
         cors_index = {}
-        for account_id, regions in s3_stores_native.items():
+        for account_id, regions in s3_stores.items():
             for bucket_name, bucket in regions[config.DEFAULT_REGION].buckets.items():
                 bucket: S3Bucket
                 buckets.add(bucket_name)
@@ -693,4 +694,4 @@ class EncryptionParameters(NamedTuple):
     bucket_key_enabled: BucketKeyEnabled
 
 
-s3_stores_native = AccountRegionBundle[S3StoreNative]("s3", S3StoreNative)
+s3_stores = AccountRegionBundle[S3Store]("s3", S3Store)

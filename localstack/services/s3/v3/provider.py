@@ -139,21 +139,7 @@ from localstack.services.s3.exceptions import (
     InvalidRequest,
     MalformedXML,
 )
-from localstack.services.s3.models_native import (
-    BucketCorsIndexNative,
-    EncryptionParameters,
-    PartialStream,
-    S3Bucket,
-    S3DeleteMarker,
-    S3Multipart,
-    S3Object,
-    S3Part,
-    S3StoreNative,
-    VersionedKeyStore,
-    s3_stores_native,
-)
 from localstack.services.s3.notifications import NotificationDispatcher, S3EventNotificationContext
-from localstack.services.s3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
 from localstack.services.s3.utils import (
     add_expiration_days_to_datetime,
     create_s3_kms_managed_key_for_region,
@@ -171,6 +157,20 @@ from localstack.services.s3.utils import (
     validate_kms_key_id,
     validate_tag_set,
 )
+from localstack.services.s3.v3.models import (
+    BucketCorsIndexNative,
+    EncryptionParameters,
+    PartialStream,
+    S3Bucket,
+    S3DeleteMarker,
+    S3Multipart,
+    S3Object,
+    S3Part,
+    S3Store,
+    VersionedKeyStore,
+    s3_stores,
+)
+from localstack.services.s3.v3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
 from localstack.services.s3.validation import validate_cors_configuration
 from localstack.utils.strings import to_str
 
@@ -235,9 +235,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         )
 
     @staticmethod
-    def get_store(account_id: str, region_name: str) -> S3StoreNative:
+    def get_store(account_id: str, region_name: str) -> S3Store:
         # Use default account id for external access? would need an anonymous one
-        return s3_stores_native[account_id][region_name]
+        return s3_stores[account_id][region_name]
 
     @handler("CreateBucket", expand=False)
     def create_bucket(
@@ -561,7 +561,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             # this is a bug in AWS: it sets the content encoding header to an empty string (parity tested)
             response["ContentEncoding"] = ""
             if request.get("ChecksumMode", "").upper() == "ENABLED":
-                response[f"Checksum{checksum_algorithm.upper()}"] = checksum  # noqa
+                response[f"Checksum{checksum_algorithm.upper()}"] = s3_object.checksum_value
 
         fileobj = self._storage_backend.get_key_fileobj(
             bucket_name=bucket_name, object_key=object_key, version_id=version_id
@@ -2413,7 +2413,7 @@ def add_encryption_to_response(response: dict, s3_object: S3Object):
 def get_encryption_parameters_from_request_and_bucket(
     request: PutObjectRequest | CopyObjectRequest | CreateMultipartUploadRequest,
     s3_bucket: S3Bucket,
-    store: S3StoreNative,
+    store: S3Store,
 ) -> EncryptionParameters:
     encryption = request.get("ServerSideEncryption")
     kms_key_id = request.get("SSEKMSKeyId")
