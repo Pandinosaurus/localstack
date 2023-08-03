@@ -73,8 +73,6 @@ SYSTEM_METADATA_SETTABLE_HEADERS = [
     "ContentType",
 ]
 
-STREAM_CHUNK_SIZE = 2048 * 2
-
 # params are required in presigned url
 SIGNATURE_V2_PARAMS = ["Signature", "Expires", "AWSAccessKeyId"]
 
