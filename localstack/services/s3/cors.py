@@ -16,6 +16,7 @@ from localstack.aws.protocol.service_router import get_service_catalog
 from localstack.constants import S3_VIRTUAL_HOSTNAME
 from localstack.http import Request, Response
 from localstack.services.s3.models import BucketCorsIndex
+from localstack.services.s3.models_native import BucketCorsIndexNative
 from localstack.services.s3.utils import S3_VIRTUAL_HOSTNAME_REGEX
 
 # TODO: add more logging statements
@@ -31,10 +32,10 @@ is_origin_allowed_default = CorsEnforcer.is_cors_origin_allowed
 
 class S3CorsHandler(Handler):
 
-    bucket_cors_index: BucketCorsIndex
+    bucket_cors_index: BucketCorsIndex | BucketCorsIndexNative
 
-    def __init__(self):
-        self.bucket_cors_index = BucketCorsIndex()
+    def __init__(self, bucket_cors_index: BucketCorsIndex | BucketCorsIndexNative = None):
+        self.bucket_cors_index = bucket_cors_index or BucketCorsIndex()
         self._service = get_service_catalog().get("s3")
         self._s3_op_router = RestServiceOperationRouter(self._service)
 
@@ -69,6 +70,7 @@ class S3CorsHandler(Handler):
             bucket_name = path.split("/")[1]
 
         existing_buckets = self.bucket_cors_index.buckets
+        print(existing_buckets, bucket_name)
         if bucket_name not in existing_buckets:
             return is_s3, None
 

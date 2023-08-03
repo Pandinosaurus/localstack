@@ -12,10 +12,12 @@ from localstack.aws.api import CommonServiceException, RequestContext, handler
 from localstack.aws.api.s3 import (
     MFA,
     AbortMultipartUploadOutput,
+    AccessControlPolicy,
     AccountId,
     Bucket,
     BucketAlreadyExists,
     BucketAlreadyOwnedByYou,
+    BucketCannedACL,
     BucketName,
     BucketNotEmpty,
     BypassGovernanceRetention,
@@ -32,6 +34,7 @@ from localstack.aws.api.s3 import (
     CopyObjectRequest,
     CopyObjectResult,
     CopyPartResult,
+    CORSConfiguration,
     CreateBucketOutput,
     CreateBucketRequest,
     CreateMultipartUploadOutput,
@@ -47,6 +50,7 @@ from localstack.aws.api.s3 import (
     Error,
     ETag,
     FetchOwner,
+    GetBucketCorsOutput,
     GetBucketEncryptionOutput,
     GetBucketLocationOutput,
     GetBucketTaggingOutput,
@@ -57,6 +61,11 @@ from localstack.aws.api.s3 import (
     GetObjectOutput,
     GetObjectRequest,
     GetObjectTaggingOutput,
+    GrantFullControl,
+    GrantRead,
+    GrantReadACP,
+    GrantWrite,
+    GrantWriteACP,
     HeadBucketOutput,
     HeadObjectOutput,
     HeadObjectRequest,
@@ -79,6 +88,7 @@ from localstack.aws.api.s3 import (
     MultipartUpload,
     MultipartUploadId,
     NoSuchBucket,
+    NoSuchCORSConfiguration,
     NoSuchKey,
     NoSuchTagSet,
     NoSuchUpload,
@@ -119,15 +129,18 @@ from localstack.aws.api.s3 import (
     VersionIdMarker,
     VersioningConfiguration,
 )
+from localstack.aws.handlers import preprocess_request, serve_custom_service_request_handlers
 from localstack.services.plugins import ServiceLifecycleHook
 from localstack.services.s3.codec import AwsChunkedDecoder
 from localstack.services.s3.constants import ARCHIVES_STORAGE_CLASSES, S3_CHUNK_SIZE
+from localstack.services.s3.cors import S3CorsHandler, s3_cors_request_handler
 from localstack.services.s3.exceptions import (
     InvalidLocationConstraint,
     InvalidRequest,
     MalformedXML,
 )
 from localstack.services.s3.models_native import (
+    BucketCorsIndexNative,
     EncryptionParameters,
     PartialStream,
     S3Bucket,
@@ -137,7 +150,7 @@ from localstack.services.s3.models_native import (
     S3Part,
     S3StoreNative,
     VersionedKeyStore,
-    s3_stores_v2,
+    s3_stores_native,
 )
 from localstack.services.s3.notifications import NotificationDispatcher, S3EventNotificationContext
 from localstack.services.s3.storage import LockedSpooledTemporaryFile, TemporaryStorageBackend
@@ -158,6 +171,7 @@ from localstack.services.s3.utils import (
     validate_kms_key_id,
     validate_tag_set,
 )
+from localstack.services.s3.validation import validate_cors_configuration
 from localstack.utils.strings import to_str
 
 LOG = logging.getLogger(__name__)
@@ -174,6 +188,11 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         super().__init__()
         self._storage_backend = TemporaryStorageBackend()
         self._notification_dispatcher = NotificationDispatcher()
+        self._cors_handler = S3CorsHandler(BucketCorsIndexNative())
+
+    def on_after_init(self):
+        preprocess_request.append(self._cors_handler)
+        serve_custom_service_request_handlers.append(s3_cors_request_handler)
 
     def on_before_stop(self):
         self._notification_dispatcher.shutdown()
@@ -218,7 +237,7 @@ class S3Provider(S3Api, ServiceLifecycleHook):
     @staticmethod
     def get_store(account_id: str, region_name: str) -> S3StoreNative:
         # Use default account id for external access? would need an anonymous one
-        return s3_stores_v2[account_id][region_name]
+        return s3_stores_native[account_id][region_name]
 
     @handler("CreateBucket", expand=False)
     def create_bucket(
@@ -264,7 +283,9 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             object_lock_enabled_for_bucket=request.get("ObjectLockEnabledForBucket"),
         )
         store.buckets[bucket_name] = s3_bucket
+        store.global_bucket_map[bucket_name] = s3_bucket.bucket_account_id
         self._storage_backend.create_bucket_directory(bucket_name)
+        self._cors_handler.invalidate_cache()
 
         # Location is always contained in response -> full url for LocationConstraint outside us-east-1
         location = (
@@ -293,6 +314,8 @@ class S3Provider(S3Api, ServiceLifecycleHook):
             )
 
         store.buckets.pop(bucket)
+        store.global_bucket_map.pop(bucket)
+        self._cors_handler.invalidate_cache()
         self._storage_backend.delete_bucket_directory(bucket)
 
     def list_buckets(
@@ -2219,6 +2242,79 @@ class S3Provider(S3Api, ServiceLifecycleHook):
         self._notify(context, s3_bucket=s3_bucket, s3_object=s3_object)
 
         return response
+
+    def put_bucket_cors(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        cors_configuration: CORSConfiguration,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+        validate_cors_configuration(cors_configuration)
+        s3_bucket.cors_rules = cors_configuration
+        self._cors_handler.invalidate_cache()
+
+    def get_bucket_cors(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> GetBucketCorsOutput:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if not s3_bucket.cors_rules:
+            raise NoSuchCORSConfiguration(
+                "The CORS configuration does not exist",
+                BucketName=bucket,
+            )
+        return GetBucketCorsOutput(CORSRules=s3_bucket.cors_rules["CORSRules"])
+
+    def delete_bucket_cors(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> None:
+        store = self.get_store(context.account_id, context.region)
+        if not (s3_bucket := store.buckets.get(bucket)):
+            raise NoSuchBucket("The specified bucket does not exist", BucketName=bucket)
+
+        if s3_bucket.cors_rules:
+            self._cors_handler.invalidate_cache()
+            s3_bucket.cors_rules = None
+
+    # ###### THIS ARE UNIMPLEMENTED METHODS TO ALLOW TESTING, DO NOT COUNT THEM AS DONE ###### #
+
+    def delete_bucket_ownership_controls(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> None:
+        # TODO: implement, this is just for CORS tests to be able to run
+        pass
+
+    def delete_public_access_block(
+        self, context: RequestContext, bucket: BucketName, expected_bucket_owner: AccountId = None
+    ) -> None:
+        # TODO: implement, this is just for CORS tests to be able to run
+        pass
+
+    def put_bucket_acl(
+        self,
+        context: RequestContext,
+        bucket: BucketName,
+        acl: BucketCannedACL = None,
+        access_control_policy: AccessControlPolicy = None,
+        content_md5: ContentMD5 = None,
+        checksum_algorithm: ChecksumAlgorithm = None,
+        grant_full_control: GrantFullControl = None,
+        grant_read: GrantRead = None,
+        grant_read_acp: GrantReadACP = None,
+        grant_write: GrantWrite = None,
+        grant_write_acp: GrantWriteACP = None,
+        expected_bucket_owner: AccountId = None,
+    ) -> None:
+        # TODO: implement, this is just for CORS tests to be able to run
+        pass
 
 
 def readinto_fileobj(
