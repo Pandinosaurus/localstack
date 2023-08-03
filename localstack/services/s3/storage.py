@@ -225,9 +225,7 @@ class LockedFileMixin:
         # these locks are for the read/write lock issues. No writer should modify the object while a reader is
         # currently iterating over it.
         # see:
-        readwrite_lock = rwlock.RWLockWrite()
-        self.read_lock = readwrite_lock.gen_rlock()
-        self.write_lock = readwrite_lock.gen_wlock()
+        self.readwrite_lock = rwlock.RWLockWrite()
 
 
 class LockedSpooledTemporaryFile(LockedFileMixin, SpooledTemporaryFile):
@@ -237,18 +235,19 @@ class LockedSpooledTemporaryFile(LockedFileMixin, SpooledTemporaryFile):
     def get_locked_stream_iterator(self) -> Iterator[bytes]:
         def stream_iterator() -> Iterator[bytes]:
             pos = 0
-            while True:
-                # don't read more than the max content-length
-                with self.position_lock:
-                    self.seek(pos)
-                    data = self.read(S3_CHUNK_SIZE)
-                if not data:
-                    return b""
+            with self.readwrite_lock.gen_rlock():
+                while True:
+                    # don't read more than the max content-length
+                    with self.position_lock:
+                        self.seek(pos)
+                        data = self.read(S3_CHUNK_SIZE)
+                    if not data:
+                        return b""
 
-                read = len(data)
-                pos += read
+                    read = len(data)
+                    pos += read
 
-                yield data
+                    yield data
 
         return stream_iterator()
 
@@ -256,20 +255,21 @@ class LockedSpooledTemporaryFile(LockedFileMixin, SpooledTemporaryFile):
         def stream_iterator() -> Iterator[bytes]:
             pos = begin
             _max_length = max_length
-            while True:
-                # don't read more than the max content-length
-                amount = min(_max_length, S3_CHUNK_SIZE)
-                with self.position_lock:
-                    self.seek(pos)
-                    data = self.read(amount)
-                if not data:
-                    return b""
+            with self.readwrite_lock.gen_rlock():
+                while True:
+                    # don't read more than the max content-length
+                    amount = min(_max_length, S3_CHUNK_SIZE)
+                    with self.position_lock:
+                        self.seek(pos)
+                        data = self.read(amount)
+                    if not data:
+                        return b""
 
-                read = len(data)
-                pos += read
-                _max_length -= read
+                    read = len(data)
+                    pos += read
+                    _max_length -= read
 
-                yield data
+                    yield data
 
         return stream_iterator()
 
