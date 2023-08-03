@@ -7,7 +7,6 @@ import io
 import json
 import logging
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -57,6 +56,7 @@ from localstack.utils.strings import (
     checksum_crc32c,
     hash_sha1,
     hash_sha256,
+    long_uid,
     short_uid,
     to_bytes,
     to_str,
@@ -257,6 +257,17 @@ def create_tmp_folder_lambda():
             shutil.rmtree(folder)
         except Exception:
             LOG.warning(f"could not delete folder {folder}")
+
+
+@pytest.fixture
+def allow_bucket_acl(s3_bucket, aws_client):
+    """
+    # Since April 2023, AWS will by default block setting ACL to your bucket and object. You need to manually disable
+    # the BucketOwnershipControls and PublicAccessBlock to make your objects public.
+    # See https://aws.amazon.com/about-aws/whats-new/2022/12/amazon-s3-automatically-enable-block-public-access-disable-access-control-lists-buckets-april-2023/
+    """
+    aws_client.s3.delete_bucket_ownership_controls(Bucket=s3_bucket)
+    aws_client.s3.delete_public_access_block(Bucket=s3_bucket)
 
 
 def _filter_header(param: dict) -> dict:
@@ -1454,7 +1465,7 @@ class TestS3:
 
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(paths=["$..ServerSideEncryption"])
-    def test_s3_copy_object_in_place(self, s3_create_bucket, snapshot, aws_client):
+    def test_s3_copy_object_in_place(self, s3_bucket, allow_bucket_acl, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.s3_api())
         snapshot.add_transformer(
             [
@@ -1463,13 +1474,9 @@ class TestS3:
             ]
         )
         object_key = "source-object"
-        bucket_name = s3_create_bucket()
-        # need to delete to allow public-read ACL on the bucket
-        aws_client.s3.delete_bucket_ownership_controls(Bucket=bucket_name)
-        aws_client.s3.delete_public_access_block(Bucket=bucket_name)
 
         resp = aws_client.s3.put_object(
-            Bucket=bucket_name,
+            Bucket=s3_bucket,
             Key=object_key,
             Body='{"key": "value"}',
             ContentType="application/json",
@@ -1477,11 +1484,11 @@ class TestS3:
         )
         snapshot.match("put_object", resp)
 
-        head_object = aws_client.s3.head_object(Bucket=bucket_name, Key=object_key)
+        head_object = aws_client.s3.head_object(Bucket=s3_bucket, Key=object_key)
         snapshot.match("head_object", head_object)
 
         object_attrs = aws_client.s3.get_object_attributes(
-            Bucket=bucket_name,
+            Bucket=s3_bucket,
             Key=object_key,
             ObjectAttributes=["StorageClass"],
         )
@@ -1489,7 +1496,7 @@ class TestS3:
 
         with pytest.raises(ClientError) as e:
             aws_client.s3.copy_object(
-                Bucket=bucket_name, CopySource=f"{bucket_name}/{object_key}", Key=object_key
+                Bucket=s3_bucket, CopySource=f"{s3_bucket}/{object_key}", Key=object_key
             )
         snapshot.match("copy-object-in-place-no-change", e.value.response)
 
@@ -1498,28 +1505,28 @@ class TestS3:
 
         # copy the object with the same StorageClass as the source object
         resp = aws_client.s3.copy_object(
-            Bucket=bucket_name,
-            CopySource=f"{bucket_name}/{object_key}",
+            Bucket=s3_bucket,
+            CopySource=f"{s3_bucket}/{object_key}",
             Key=object_key,
             ChecksumAlgorithm="SHA256",
             StorageClass=StorageClass.STANDARD,
         )
         snapshot.match("copy-object-in-place-with-storage-class", resp)
         object_attrs = aws_client.s3.get_object_attributes(
-            Bucket=bucket_name,
+            Bucket=s3_bucket,
             Key=object_key,
             ObjectAttributes=["StorageClass"],
         )
         snapshot.match("object-attrs-after-copy", object_attrs)
 
         # get source object ACl, private
-        object_acl = aws_client.s3.get_object_acl(Bucket=bucket_name, Key=object_key)
+        object_acl = aws_client.s3.get_object_acl(Bucket=s3_bucket, Key=object_key)
         snapshot.match("object-acl", object_acl)
         # copy the object with any ACL does not work, even if different from source object
         with pytest.raises(ClientError) as e:
             aws_client.s3.copy_object(
-                Bucket=bucket_name,
-                CopySource=f"{bucket_name}/{object_key}",
+                Bucket=s3_bucket,
+                CopySource=f"{s3_bucket}/{object_key}",
                 Key=object_key,
                 ACL="public-read",
             )
@@ -2036,7 +2043,7 @@ class TestS3:
         paths=["$..Grants..Grantee.DisplayName", "$.permission-acl-key1.Grants"],
     )
     def test_s3_multipart_upload_acls(
-        self, s3_create_bucket, s3_multipart_upload, snapshot, aws_client
+        self, s3_bucket, allow_bucket_acl, s3_multipart_upload, snapshot, aws_client
     ):
         # https://docs.aws.amazon.com/AmazonS3/latest/userguide/managing-acls.html
         # > Bucket and object permissions are independent of each other. An object does not inherit the permissions
@@ -2048,28 +2055,28 @@ class TestS3:
                 snapshot.transform.key_value("ID", value_replacement="owner-id"),
             ]
         )
-        bucket_name = f"test-bucket-{short_uid()}"
-        s3_create_bucket(Bucket=bucket_name, ACL="public-read")
-        response = aws_client.s3.get_bucket_acl(Bucket=bucket_name)
+
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, ACL="public-read")
+        response = aws_client.s3.get_bucket_acl(Bucket=s3_bucket)
         snapshot.match("bucket-acl", response)
 
         def check_permissions(key):
-            acl_response = aws_client.s3.get_object_acl(Bucket=bucket_name, Key=key)
+            acl_response = aws_client.s3.get_object_acl(Bucket=s3_bucket, Key=key)
             snapshot.match(f"permission-{key}", acl_response)
 
         # perform uploads (multipart and regular) and check ACLs
-        aws_client.s3.put_object(Bucket=bucket_name, Key="acl-key0", Body="something")
+        aws_client.s3.put_object(Bucket=s3_bucket, Key="acl-key0", Body="something")
         check_permissions("acl-key0")
-        s3_multipart_upload(bucket=bucket_name, key="acl-key1")
+        s3_multipart_upload(bucket=s3_bucket, key="acl-key1")
         check_permissions("acl-key1")
-        s3_multipart_upload(bucket=bucket_name, key="acl-key2", acl="public-read-write")
+        s3_multipart_upload(bucket=s3_bucket, key="acl-key2", acl="public-read-write")
         check_permissions("acl-key2")
 
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(
         condition=is_old_provider, paths=["$..Grants..Grantee.DisplayName", "$..Grants..Grantee.ID"]
     )
-    def test_s3_bucket_acl(self, s3_create_bucket, snapshot, aws_client):
+    def test_s3_bucket_acl(self, s3_bucket, allow_bucket_acl, snapshot, aws_client):
         # loosely based on
         # https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html
         snapshot.add_transformer(
@@ -2081,20 +2088,21 @@ class TestS3:
         list_bucket_output = aws_client.s3.list_buckets()
         owner = list_bucket_output["Owner"]
 
-        bucket_name = s3_create_bucket(ACL="public-read")
-        response = aws_client.s3.get_bucket_acl(Bucket=bucket_name)
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, ACL="public-read")
+
+        response = aws_client.s3.get_bucket_acl(Bucket=s3_bucket)
         snapshot.match("get-bucket-acl", response)
 
-        aws_client.s3.put_bucket_acl(Bucket=bucket_name, ACL="private")
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, ACL="private")
 
-        response = aws_client.s3.get_bucket_acl(Bucket=bucket_name)
+        response = aws_client.s3.get_bucket_acl(Bucket=s3_bucket)
         snapshot.match("get-bucket-canned-acl", response)
 
         aws_client.s3.put_bucket_acl(
-            Bucket=bucket_name, GrantRead='uri="http://acs.amazonaws.com/groups/s3/LogDelivery"'
+            Bucket=s3_bucket, GrantRead='uri="http://acs.amazonaws.com/groups/s3/LogDelivery"'
         )
 
-        response = aws_client.s3.get_bucket_acl(Bucket=bucket_name)
+        response = aws_client.s3.get_bucket_acl(Bucket=s3_bucket)
         snapshot.match("get-bucket-grant-acl", response)
 
         # Owner is mandatory, otherwise raise MalformedXML
@@ -2114,9 +2122,9 @@ class TestS3:
                 },
             ],
         }
-        aws_client.s3.put_bucket_acl(Bucket=bucket_name, AccessControlPolicy=acp)
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, AccessControlPolicy=acp)
 
-        response = aws_client.s3.get_bucket_acl(Bucket=bucket_name)
+        response = aws_client.s3.get_bucket_acl(Bucket=s3_bucket)
         snapshot.match("get-bucket-acp-acl", response)
 
     @markers.parity.aws_validated
@@ -2327,7 +2335,7 @@ class TestS3:
     def test_bucket_availability(self, snapshot, aws_client):
         snapshot.add_transformer(snapshot.transform.key_value("BucketName"))
         # make sure to have a non created bucket, got some AccessDenied against AWS
-        bucket_name = f"test-bucket-lifecycle-{short_uid()}-{short_uid()}"
+        bucket_name = f"test-bucket-lifecycle-{long_uid()}"
         with pytest.raises(ClientError) as e:
             aws_client.s3.get_bucket_lifecycle(Bucket=bucket_name)
         snapshot.match("bucket-lifecycle", e.value.response)
@@ -2335,24 +2343,6 @@ class TestS3:
         with pytest.raises(ClientError) as e:
             aws_client.s3.get_bucket_replication(Bucket=bucket_name)
         snapshot.match("bucket-replication", e.value.response)
-
-    @markers.parity.aws_validated
-    def test_location_path_url(self, s3_create_bucket, account_id, snapshot, aws_client):
-        region = "us-east-2"
-        bucket_name = s3_create_bucket(
-            CreateBucketConfiguration={"LocationConstraint": region}, ACL="public-read"
-        )
-        response = aws_client.s3.get_bucket_location(Bucket=bucket_name)
-        assert region == response["LocationConstraint"]
-
-        url = _bucket_url(bucket_name, region)
-        # https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html
-        # make raw request, assert that newline is contained after XML preamble: <?xml ...>\n
-        response = requests.get(f"{url}?location?x-amz-expected-bucket-owner={account_id}")
-        assert response.ok
-
-        content = to_str(response.content)
-        assert re.match(r"^<\?xml [^>]+>\n<.*", content, flags=re.MULTILINE)
 
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(condition=is_old_provider, paths=["$..Error.RequestID"])
@@ -2413,24 +2403,24 @@ class TestS3:
             "$..VersionId",
         ],
     )
-    def test_get_object_with_anon_credentials(self, s3_create_bucket, snapshot, aws_client):
+    def test_get_object_with_anon_credentials(
+        self, s3_bucket, allow_bucket_acl, snapshot, aws_client
+    ):
         snapshot.add_transformer(snapshot.transform.s3_api())
-
-        bucket_name = f"bucket-{short_uid()}"
         object_key = f"key-{short_uid()}"
         body = "body data"
 
-        s3_create_bucket(Bucket=bucket_name, ACL="public-read")
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, ACL="public-read")
 
         aws_client.s3.put_object(
-            Bucket=bucket_name,
+            Bucket=s3_bucket,
             Key=object_key,
             Body=body,
         )
-        aws_client.s3.put_object_acl(Bucket=bucket_name, Key=object_key, ACL="public-read")
+        aws_client.s3.put_object_acl(Bucket=s3_bucket, Key=object_key, ACL="public-read")
         s3_anon_client = _anon_client("s3")
 
-        response = s3_anon_client.get_object(Bucket=bucket_name, Key=object_key)
+        response = s3_anon_client.get_object(Bucket=s3_bucket, Key=object_key)
         snapshot.match("get_object", response)
 
     @markers.parity.aws_validated
@@ -2834,13 +2824,11 @@ class TestS3:
         snapshot.match("delete-object-delete-marker", response)
 
     @markers.parity.aws_validated
-    @markers.snapshot.skip_snapshot_verify(
-        paths=["$..Error.RequestID"]
-    )  # fixme RequestID not in AWS response
+    @markers.snapshot.skip_snapshot_verify(condition=is_old_provider, paths=["$..Error.RequestID"])
     def test_delete_non_existing_keys_in_non_existing_bucket(self, snapshot, aws_client):
         with pytest.raises(ClientError) as e:
             aws_client.s3.delete_objects(
-                Bucket="non-existent-bucket",
+                Bucket=f"non-existent-bucket-{long_uid()}",
                 Delete={"Objects": [{"Key": "dummy1"}, {"Key": "dummy2"}]},
             )
         assert "NoSuchBucket" == e.value.response["Error"]["Code"]
@@ -3092,7 +3080,7 @@ class TestS3:
     @markers.parity.aws_validated
     @markers.snapshot.skip_snapshot_verify(condition=is_old_provider, paths=["$..VersionId"])
     def test_set_external_hostname(
-        self, s3_bucket, s3_multipart_upload, monkeypatch, snapshot, aws_client
+        self, s3_bucket, allow_bucket_acl, s3_multipart_upload, monkeypatch, snapshot, aws_client
     ):
         snapshot.add_transformer(
             [
@@ -3341,7 +3329,7 @@ class TestS3:
             )
 
             with pytest.raises(ClientError) as e:
-                aws_client.s3.head_bucket(Bucket=f"does-not-exist-{short_uid()}-{short_uid()}")
+                aws_client.s3.head_bucket(Bucket=f"does-not-exist-{long_uid()}")
             snapshot.match("head_bucket_not_exist", e.value.response)
         finally:
             aws_client.s3.delete_bucket(Bucket=bucket_1)
@@ -3365,7 +3353,10 @@ class TestS3:
 
         bucket_name = f"my.bucket.name.{short_uid()}"
 
-        s3_create_bucket(Bucket=bucket_name, ACL="public-read")
+        s3_create_bucket(Bucket=bucket_name)
+        aws_client.s3.delete_bucket_ownership_controls(Bucket=bucket_name)
+        aws_client.s3.delete_public_access_block(Bucket=bucket_name)
+        aws_client.s3.put_bucket_acl(Bucket=bucket_name, ACL="public-read")
         aws_client.s3.put_object(Bucket=bucket_name, Key="my-content", Body="something")
         response = aws_client.s3.list_objects(Bucket=bucket_name)
         assert response["Contents"][0]["Key"] == "my-content"
@@ -3727,29 +3718,28 @@ class TestS3:
         ]
     )
     def test_s3_batch_delete_public_objects_using_requests(
-        self, s3_create_bucket, snapshot, aws_client
+        self, s3_bucket, allow_bucket_acl, snapshot, aws_client
     ):
         # only "public" created objects can be deleted by anonymous clients
         # https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#specifying-grantee-predefined-groups
         snapshot.add_transformer(snapshot.transform.s3_api())
-        bucket_name = f"bucket-{short_uid()}"
         object_key_1 = "key-created-by-anonymous-1"
         object_key_2 = "key-created-by-anonymous-2"
 
-        s3_create_bucket(Bucket=bucket_name, ACL="public-read-write")
+        aws_client.s3.put_bucket_acl(Bucket=s3_bucket, ACL="public-read-write")
         anon = _anon_client("s3")
         anon.put_object(
-            Bucket=bucket_name, Key=object_key_1, Body="This body document", ACL="public-read-write"
+            Bucket=s3_bucket, Key=object_key_1, Body="This body document", ACL="public-read-write"
         )
         anon.put_object(
-            Bucket=bucket_name,
+            Bucket=s3_bucket,
             Key=object_key_2,
             Body="This body document #2",
             ACL="public-read-write",
         )
 
         # TODO delete does currently not work with S3_VIRTUAL_HOSTNAME
-        url = f"{_bucket_url(bucket_name, localstack_host=config.LOCALSTACK_HOSTNAME)}?delete"
+        url = f"{_bucket_url(s3_bucket, localstack_host=config.LOCALSTACK_HOSTNAME)}?delete"
 
         data = f"""
             <Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -3775,7 +3765,7 @@ class TestS3:
 
         snapshot.match("multi-delete-with-requests", response)
 
-        response = aws_client.s3.list_objects(Bucket=bucket_name)
+        response = aws_client.s3.list_objects(Bucket=s3_bucket)
         snapshot.match("list-remaining-objects", response)
 
     @markers.parity.aws_validated
@@ -4297,13 +4287,13 @@ class TestS3:
         resp_dict = xmltodict.parse(resp.content)
         assert resp_dict["Tagging"]["TagSet"] == {"Tag": {"Key": "tag1", "Value": "tag1"}}
 
-    @markers.parity.aws_validated
+    # This test doesn't work against AWS anymore because of some authorization error.
+    @markers.parity.only_localstack
     def test_s3_delete_objects_trailing_slash(self, aws_http_client_factory, s3_bucket, aws_client):
         object_key = "key-to-delete-trailing-slash"
         # create an object to delete
         aws_client.s3.put_object(Bucket=s3_bucket, Key=object_key, Body=b"123")
 
-        headers = {"x-amz-content-sha256": "UNSIGNED-PAYLOAD"}
         s3_http_client = aws_http_client_factory("s3", signer_factory=SigV4Auth)
 
         # Endpoint as created by Rust and AWS JS SDK v3
@@ -4315,10 +4305,9 @@ class TestS3:
              </Object>
         </Delete>
         """
-
         # Post the request to delete the objects, with a trailing slash in the URL
-        resp = s3_http_client.post(bucket_url, headers=headers, data=delete_body)
-        assert resp.status_code == 200
+        resp = s3_http_client.post(bucket_url, data=delete_body)
+        assert resp.status_code == 200, (resp.content, resp.headers)
 
         resp_dict = xmltodict.parse(resp.content)
         assert "DeleteResult" in resp_dict
@@ -5238,7 +5227,7 @@ class TestS3:
             )
         snapshot.match("put-bucket-logging-different-regions", e.value.response)
 
-        nonexistent_target_bucket = f"target-bucket-{short_uid()}-{short_uid()}"
+        nonexistent_target_bucket = f"target-bucket-{long_uid()}"
         with pytest.raises(ClientError) as e:
             bucket_logging_status = {
                 "LoggingEnabled": {

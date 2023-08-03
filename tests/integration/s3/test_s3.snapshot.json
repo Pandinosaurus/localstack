@@ -922,8 +922,110 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_multipart_upload_acls": {
-    "recorded-date": "03-08-2023, 04:16:04",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 16:53:20",
+    "recorded-content": {
+      "bucket-acl": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          },
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/global/AllUsers"
+            },
+            "Permission": "READ"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "permission-acl-key0": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "permission-acl-key1": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "permission-acl-key2": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          },
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/global/AllUsers"
+            },
+            "Permission": "READ"
+          },
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/global/AllUsers"
+            },
+            "Permission": "WRITE"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_object_expiry": {
     "recorded-date": "03-08-2023, 04:16:18",
@@ -1061,8 +1163,23 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_get_object_with_anon_credentials": {
-    "recorded-date": "03-08-2023, 04:16:32",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 17:03:12",
+    "recorded-content": {
+      "get_object": {
+        "AcceptRanges": "bytes",
+        "Body": "body data",
+        "ContentLength": 9,
+        "ContentType": "binary/octet-stream",
+        "ETag": "\"53ebc26c3ff5decfe9ffc7bdbaa02459\"",
+        "LastModified": "datetime",
+        "Metadata": {},
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_putobject_with_multiple_keys": {
     "recorded-date": "03-08-2023, 04:16:33",
@@ -1294,8 +1411,20 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_delete_non_existing_keys_in_non_existing_bucket": {
-    "recorded-date": "03-08-2023, 04:17:13",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 17:08:33",
+    "recorded-content": {
+      "error-non-existent-bucket": {
+        "Error": {
+          "BucketName": "non-existent-bucket-fcfd69e1-f2c0-4167-aeaa-a2b2137926b4",
+          "Code": "NoSuchBucket",
+          "Message": "The specified bucket does not exist"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 404
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_request_payer": {
     "recorded-date": "03-08-2023, 04:17:17",
@@ -1536,8 +1665,31 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_set_external_hostname": {
-    "recorded-date": "03-08-2023, 04:17:59",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 17:09:20",
+    "recorded-content": {
+      "multipart-upload": {
+        "Bucket": "<bucket:1>",
+        "ETag": "\"b972025bc34adf8d76d6d51e93c035cc-1\"",
+        "Key": "test.file",
+        "Location": "<location:1>",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-object": {
+        "Bucket": "<bucket:1>",
+        "ETag": "\"b972025bc34adf8d76d6d51e93c035cc-1\"",
+        "Key": "test.file",
+        "Location": "<location:1>",
+        "ServerSideEncryption": "AES256",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_lambda_integration": {
     "recorded-date": "03-08-2023, 04:18:58",
@@ -1683,8 +1835,63 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_bucket_name_with_dots": {
-    "recorded-date": "03-08-2023, 04:19:14",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 17:13:12",
+    "recorded-content": {
+      "list_objects": {
+        "Contents": [
+          {
+            "ETag": "\"437b930db84b8079c2dd804a71936b5f\"",
+            "Key": "my-content",
+            "LastModified": "datetime",
+            "Owner": {
+              "DisplayName": "<display-name>",
+              "ID": "<owner-id>"
+            },
+            "Size": 9,
+            "StorageClass": "STANDARD"
+          }
+        ],
+        "EncodingType": "url",
+        "IsTruncated": false,
+        "Marker": "",
+        "MaxKeys": 1000,
+        "Name": "<bucket-name:1>",
+        "Prefix": "",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "list_objects_headers": {
+        "content-type": "application/xml",
+        "date": "date",
+        "server": "AmazonS3",
+        "transfer-encoding": "chunked",
+        "x-amz-bucket-region": "<region>",
+        "x-amz-id-2": "x-amz-id-2",
+        "x-amz-request-id": "x-amz-request-id"
+      },
+      "request_vhost_url_content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name><bucket-name:1></Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>my-content</Key><LastModified>date</LastModified><ETag>&quot;437b930db84b8079c2dd804a71936b5f&quot;</ETag><Size>9</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>",
+      "request_vhost_headers": {
+        "Content-Type": "application/xml",
+        "Date": "date",
+        "Server": "AmazonS3",
+        "Transfer-Encoding": "chunked",
+        "x-amz-bucket-region": "<region>",
+        "x-amz-id-2": "x-amz-id-2",
+        "x-amz-request-id": "x-amz-request-id"
+      },
+      "request_path_url_content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name><bucket-name:1></Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>my-content</Key><LastModified>date</LastModified><ETag>&quot;437b930db84b8079c2dd804a71936b5f&quot;</ETag><Size>9</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>",
+      "request_path_headers": {
+        "Content-Type": "application/xml",
+        "Date": "date",
+        "Server": "AmazonS3",
+        "Transfer-Encoding": "chunked",
+        "x-amz-bucket-region": "<region>",
+        "x-amz-id-2": "x-amz-id-2",
+        "x-amz-request-id": "x-amz-request-id"
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_put_more_than_1000_items": {
     "recorded-date": "03-08-2023, 04:23:05",
@@ -2105,8 +2312,34 @@
     "recorded-content": {}
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_batch_delete_public_objects_using_requests": {
-    "recorded-date": "03-08-2023, 04:23:42",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 17:15:13",
+    "recorded-content": {
+      "multi-delete-with-requests": {
+        "DeleteResult": {
+          "@xmlns": "http://s3.amazonaws.com/doc/2006-03-01/",
+          "Deleted": [
+            {
+              "Key": "key-created-by-anonymous-1"
+            },
+            {
+              "Key": "key-created-by-anonymous-2"
+            }
+          ]
+        }
+      },
+      "list-remaining-objects": {
+        "EncodingType": "url",
+        "IsTruncated": false,
+        "Marker": "",
+        "MaxKeys": 1000,
+        "Name": "<bucket-name:1>",
+        "Prefix": "",
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_batch_delete_objects": {
     "recorded-date": "03-08-2023, 04:23:45",
@@ -2340,8 +2573,102 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_bucket_acl": {
-    "recorded-date": "03-08-2023, 04:16:05",
-    "recorded-content": {}
+    "recorded-date": "03-08-2023, 16:55:21",
+    "recorded-content": {
+      "get-bucket-acl": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          },
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/global/AllUsers"
+            },
+            "Permission": "READ"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-bucket-canned-acl": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-bucket-grant-acl": {
+        "Grants": [
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery"
+            },
+            "Permission": "READ"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      },
+      "get-bucket-acp-acl": {
+        "Grants": [
+          {
+            "Grantee": {
+              "DisplayName": "<display-name:1>",
+              "ID": "<owner-id:1>",
+              "Type": "CanonicalUser"
+            },
+            "Permission": "FULL_CONTROL"
+          },
+          {
+            "Grantee": {
+              "Type": "Group",
+              "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery"
+            },
+            "Permission": "WRITE"
+          }
+        ],
+        "Owner": {
+          "DisplayName": "<display-name:1>",
+          "ID": "<owner-id:1>"
+        },
+        "ResponseMetadata": {
+          "HTTPHeaders": {},
+          "HTTPStatusCode": 200
+        }
+      }
+    }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_bucket_acl_exceptions": {
     "recorded-date": "03-08-2023, 04:16:13",
@@ -5670,7 +5997,7 @@
     }
   },
   "tests/integration/s3/test_s3.py::TestS3::test_s3_copy_object_in_place": {
-    "recorded-date": "03-08-2023, 04:15:21",
+    "recorded-date": "03-08-2023, 16:51:58",
     "recorded-content": {
       "put_object": {
         "ETag": "\"88bac95f31528d13a072c05f2a1cf371\"",
