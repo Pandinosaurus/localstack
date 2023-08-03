@@ -99,7 +99,7 @@ class S3Bucket:
     policy: Optional[Policy]
     website_configuration: WebsiteConfiguration
     acl: str  # TODO: change this
-    cors_rules: CORSConfiguration
+    cors_rules: Optional[CORSConfiguration]
     logging: LoggingEnabled
     notification_configuration: NotificationConfiguration
     payer: Payer
@@ -135,6 +135,7 @@ class S3Bucket:
         self.multiparts = {}
         self.versioning_status = None
         self.notification_configuration = {}
+        self.cors_rules = None
 
         # see https://docs.aws.amazon.com/AmazonS3/latest/API/API_Owner.html
         self.owner = get_owner_for_account_id(account_id)
@@ -616,7 +617,7 @@ class S3StoreNative(BaseStore):
     TAGS: TaggingService = CrossAccountAttribute(default=TaggingService)
 
 
-class BucketCorsIndexV2:
+class BucketCorsIndexNative:
     def __init__(self):
         self._cors_index_cache = None
         self._bucket_index_cache = None
@@ -624,13 +625,13 @@ class BucketCorsIndexV2:
     @property
     def cors(self) -> dict[str, CORSConfiguration]:
         if self._cors_index_cache is None:
-            self._cors_index_cache = self._build_index()
+            self._bucket_index_cache, self._cors_index_cache = self._build_index()
         return self._cors_index_cache
 
     @property
     def buckets(self) -> set[str]:
         if self._bucket_index_cache is None:
-            self._bucket_index_cache = self._build_index()
+            self._bucket_index_cache, self._cors_index_cache = self._build_index()
         return self._bucket_index_cache
 
     def invalidate(self):
@@ -641,7 +642,7 @@ class BucketCorsIndexV2:
     def _build_index() -> tuple[set[BucketName], dict[BucketName, CORSConfiguration]]:
         buckets = set()
         cors_index = {}
-        for account_id, regions in s3_stores_v2.items():
+        for account_id, regions in s3_stores_native.items():
             for bucket_name, bucket in regions[config.DEFAULT_REGION].buckets.items():
                 bucket: S3Bucket
                 buckets.add(bucket_name)
@@ -692,4 +693,4 @@ class EncryptionParameters(NamedTuple):
     bucket_key_enabled: BucketKeyEnabled
 
 
-s3_stores_v2 = AccountRegionBundle[S3StoreNative]("s3", S3StoreNative)
+s3_stores_native = AccountRegionBundle[S3StoreNative]("s3", S3StoreNative)
