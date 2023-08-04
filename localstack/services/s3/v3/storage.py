@@ -382,7 +382,6 @@ class LockedSpooledTemporaryFile(LockedFileMixin, SpooledTemporaryFile):
 #
 
 
-# TODO: not tested, this is just a thought, need actual test
 class LimitedIterableWrapper(Iterable[bytes]):
     def __init__(self, iterable: Iterable[bytes], max_length: int):
         self.iterable = iterable
@@ -394,8 +393,9 @@ class LimitedIterableWrapper(Iterable[bytes]):
             if self.max_length - read >= 0:
                 self.max_length -= read
                 yield chunk
-
-            yield chunk[: self.max_length - read]
+            else:
+                yield chunk[: self.max_length + 1]
+                break
 
         return
 
@@ -461,7 +461,9 @@ class S3StoredMultipart(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def complete_multipart(self) -> S3StoredObject:
+    def complete_multipart(
+        self, s3_stored_object: S3StoredObject, parts: list[PartNumber]  # TODO: revisit next
+    ) -> S3StoredObject:
         pass
 
     @abc.abstractmethod
@@ -600,12 +602,14 @@ class EphemeralS3StoredMultipart(S3StoredMultipart):
 
         return stored_part
 
-    @abc.abstractmethod
     def remove_part(self, s3_part: S3Part):
-        pass
+        stored_part = self.parts.pop(s3_part.part_number, None)
+        if stored_part:
+            stored_part.close()
 
-    @abc.abstractmethod
-    def complete_multipart(self) -> EphemeralS3StoredObject:
+    def complete_multipart(
+        self, s3_stored_object: EphemeralS3StoredObject, parts: list[PartNumber]
+    ) -> EphemeralS3StoredObject:
         pass
 
     def close(self):
